@@ -3,6 +3,8 @@ import pandas as pd
 import base64
 from datetime import datetime
 import re
+import zipfile
+import io
 
 # 页面配置
 st.set_page_config(
@@ -12,7 +14,7 @@ st.set_page_config(
 )
 
 st.title("📡 ZTE微波开站脚本生成器")
-st.subheader("简化版本 - 修复设备名称格式问题")
+st.subheader("简化版本 - 新增ZIP打包功能")
 
 class DataProcessor:
     @staticmethod
@@ -76,13 +78,10 @@ class DataProcessor:
         
         df = df.dropna(how='all')
         
-        # 修复IP地址格式问题
-        df = DataProcessor.fix_ip_addresses(df)
-        
         return df
 
     @staticmethod
-    def fix_ip_addresses(df):
+    def fix_ip_addresses(df, log_container):
         """修复IP地址格式问题"""
         if 'IP地址' not in df.columns:
             return df
@@ -147,10 +146,10 @@ class DataProcessor:
         original_ips = df['IP地址'].tolist()
         df['IP地址'] = df['IP地址'].apply(convert_ip_format)
         
-        # 显示修复信息
+        # 在日志容器中显示修复信息
         for i, (original, fixed) in enumerate(zip(original_ips, df['IP地址'])):
             if original != fixed:
-                st.info(f"🔧 IP地址修复: {original} → {fixed}")
+                log_container.info(f"🔧 IP地址修复: {original} → {fixed}")
         
         return df
 
@@ -234,6 +233,9 @@ class DataProcessor:
             return None
         
         log_container.info(f"🔍 正在查找CHAVE: {chave_number}")
+        
+        # 修复DCN数据中的IP地址格式
+        dcn_data = DataProcessor.fix_ip_addresses(dcn_data, log_container)
         
         # 自动检测列名
         detected_columns = DataProcessor.auto_detect_columns(datasheet_data, log_container)
@@ -613,6 +615,23 @@ def create_download_link(content, filename, text):
     href = f'<a href="data:file/txt;base64,{b64}" download="{filename}">{text}</a>'
     return href
 
+def create_zip_download(script_a, script_b, site_a_name, site_b_name, chave_number):
+    """创建ZIP打包下载链接"""
+    zip_buffer = io.BytesIO()
+    
+    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+        # 添加站点A脚本
+        zip_file.writestr(f"{site_a_name}.txt", script_a)
+        # 添加站点B脚本
+        zip_file.writestr(f"{site_b_name}.txt", script_b)
+    
+    zip_buffer.seek(0)
+    b64_zip = base64.b64encode(zip_buffer.read()).decode()
+    zip_filename = f"{chave_number}.zip"
+    
+    href = f'<a href="data:application/zip;base64,{b64_zip}" download="{zip_filename}">📦 下载ZIP包 ({zip_filename})</a>'
+    return href
+
 # 初始化会话状态
 if 'dcn_data' not in st.session_state:
     st.session_state.dcn_data = None
@@ -634,7 +653,7 @@ if dcn_file:
     st.session_state.dcn_data = processor.parse_dcn_file(dcn_file)
     if st.session_state.dcn_data is not None:
         st.success(f"✅ DCN文件加载成功，共 {len(st.session_state.dcn_data)} 条记录")
-        # 显示DCN数据预览（IP地址修复后）
+        # 显示DCN数据预览
         with st.expander("📊 DCN数据预览", expanded=False):
             st.dataframe(st.session_state.dcn_data.head())
 
@@ -698,6 +717,12 @@ if hasattr(st.session_state, 'config') and st.session_state.config:
         with st.expander(f"查看 {site_b_name} 脚本", expanded=True):
             st.code(script_b, language='bash')
         st.markdown(create_download_link(script_b, f"{site_b_name}.txt", "📥 下载脚本"), unsafe_allow_html=True)
+    
+    # ZIP打包下载
+    st.markdown("---")
+    st.subheader("📦 批量下载")
+    st.markdown(create_zip_download(script_a, script_b, site_a_name, site_b_name, chave_number), unsafe_allow_html=True)
+    st.info(f"ZIP包包含: {site_a_name}.txt 和 {site_b_name}.txt")
 
 # 配置详情折叠页
 if hasattr(st.session_state, 'config') and st.session_state.config:
@@ -706,9 +731,9 @@ if hasattr(st.session_state, 'config') and st.session_state.config:
 
 st.sidebar.markdown("---")
 st.sidebar.info("""
-**修复设备名称版本:**
-✅ 修复设备名称多余连字符问题
-✅ 标准设备名称格式
-✅ 智能连字符清理
-✅ 完整的格式验证
+**ZIP打包版本:**
+✅ IP修复信息移到处理日志
+✅ 新增ZIP打包下载功能
+✅ 批量下载两个站点脚本
+✅ 以CHAVE号码命名ZIP文件
 """)
