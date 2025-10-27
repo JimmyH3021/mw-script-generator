@@ -12,7 +12,7 @@ st.set_page_config(
 )
 
 st.title("📡 ZTE微波开站脚本生成器")
-st.subheader("简化版本 - 并排脚本显示")
+st.subheader("简化版本 - 修复频率映射问题")
 
 class DataProcessor:
     @staticmethod
@@ -232,15 +232,25 @@ class DataProcessor:
         # 提取无线参数
         bandwidth = match_data.get(detected_columns.get('bandwidth'), 112)
         tx_power = match_data.get(detected_columns.get('tx_power'), 220)
-        tx_freq = match_data.get(detected_columns.get('tx_freq'), 14977)
-        rx_freq = match_data.get(detected_columns.get('rx_freq'), 14577)
+        tx_freq_a = match_data.get(detected_columns.get('tx_freq'), 14977)  # 站点A的发射频率
+        rx_freq_a = match_data.get(detected_columns.get('rx_freq'), 14577)  # 站点A的接收频率
         
         # 转换频率单位 MHz → KHz (乘以1000)
         bandwidth_khz = int(bandwidth) * 1000
-        tx_freq_khz = int(tx_freq) * 1000
-        rx_freq_khz = int(rx_freq) * 1000
+        tx_freq_a_khz = int(tx_freq_a) * 1000
+        rx_freq_a_khz = int(rx_freq_a) * 1000
         
-        st.info(f"📡 无线参数: 带宽={bandwidth}MHz→{bandwidth_khz}KHz, 功率={tx_power}dBm, 发射={tx_freq}MHz→{tx_freq_khz}KHz, 接收={rx_freq}MHz→{rx_freq_khz}KHz")
+        # 站点B的频率应该是站点A的相反
+        # 站点B的TX频率 = 站点A的RX频率
+        # 站点B的RX频率 = 站点A的TX频率
+        tx_freq_b_khz = rx_freq_a_khz
+        rx_freq_b_khz = tx_freq_a_khz
+        
+        st.info(f"📡 无线参数:")
+        st.info(f"  - 带宽: {bandwidth}MHz → {bandwidth_khz}KHz")
+        st.info(f"  - 功率: {tx_power}dBm")
+        st.info(f"  - 站点A: TX={tx_freq_a}MHz→{tx_freq_a_khz}KHz, RX={rx_freq_a}MHz→{rx_freq_a_khz}KHz")
+        st.info(f"  - 站点B: TX={rx_freq_a}MHz→{tx_freq_b_khz}KHz, RX={tx_freq_a}MHz→{rx_freq_b_khz}KHz")
         
         # 计算网关
         def calculate_gateway(ip_with_subnet):
@@ -260,20 +270,22 @@ class DataProcessor:
                 'device_name': device_name,
                 'ip': site_a_info.get('IP地址') if site_a_info else '10.211.51.202',
                 'vlan': site_a_info.get('VLAN') if site_a_info else 2929,
-                'gateway': gateway_a
+                'gateway': gateway_a,
+                'tx_frequency': tx_freq_a_khz,
+                'rx_frequency': rx_freq_a_khz
             },
             'site_b': {
                 'site_name': site_b,
                 'device_name': device_name.replace(site_a, site_b) if site_a in device_name else f"MWE-MG-{site_b}-N1-ZT",
                 'ip': site_b_info.get('IP地址') if site_b_info else '10.211.51.203',
                 'vlan': site_b_info.get('VLAN') if site_b_info else 2929,
-                'gateway': gateway_b
+                'gateway': gateway_b,
+                'tx_frequency': tx_freq_b_khz,
+                'rx_frequency': rx_freq_b_khz
             },
             'radio_params': {
                 'bandwidth': bandwidth_khz,
                 'tx_power': int(tx_power),
-                'tx_frequency': tx_freq_khz,
-                'rx_frequency': rx_freq_khz,
                 'modulation': 'bpsk',
                 'operation_mode': 'G02'
             }
@@ -281,19 +293,22 @@ class DataProcessor:
         
         return config
 
-# ZTEScriptGenerator 类保持不变
 class ZTEScriptGenerator:
     @staticmethod
     def generate_script(config, for_site_a=True):
-        """生成精确的ZTE脚本"""
+        """生成精确的ZTE脚本 - 修复频率映射问题"""
         if for_site_a:
             site = config['site_a']
             peer = config['site_b']
             site_id = site['site_name']
+            tx_frequency = site['tx_frequency']  # 使用站点A自己的TX频率
+            rx_frequency = site['rx_frequency']  # 使用站点A自己的RX频率
         else:
             site = config['site_b']
             peer = config['site_a']
             site_id = site['site_name']
+            tx_frequency = site['tx_frequency']  # 使用站点B自己的TX频率
+            rx_frequency = site['rx_frequency']  # 使用站点B自己的RX频率
         
         # 生成对端描述
         peer_suffix = peer['site_name'].split('-')[-1] if '-' in peer['site_name'] else peer['site_name']
@@ -353,9 +368,9 @@ snmp-server host    10.103.67.13 trap version 3 priv  zte udp-port 162 snmp
 
 snmp-server host    10.216.59.50 trap version 3 priv  telco_zte udp-port 162 snmp 
 
-snmp-server host    10.192.67.183 trap version 3 priv  telco_zte udp-port 162 snmp 
+snmp-server host    10.192.67.183 trap版本 3 priv  telco_zte udp-port 162 snmp 
 
-snmp-server host    10.221.63.226 trap version 3 priv  telco_zte udp-port 162 snmp 
+snmp-server host    10.221.63.226 trap版本 3 priv  telco_zte udp-port 162 snmp 
 
 
 radio-group xpic
@@ -387,8 +402,8 @@ yes
 modulation
 fixed-modulation  {config['radio_params']['modulation']} 
 $
-tx-frequency  {config['radio_params']['tx_frequency']} 
-rx-frequency  {config['radio_params']['rx_frequency']} 
+tx-frequency  {tx_frequency} 
+rx-frequency  {rx_frequency} 
 tx-power  {config['radio_params']['tx_power']} 
 discription  To_{peer_suffix}_H1 
 operation-mode  {config['radio_params']['operation_mode']} 
@@ -402,8 +417,8 @@ yes
 modulation
 fixed-modulation  {config['radio_params']['modulation']} 
 $
-tx-frequency  {config['radio_params']['tx_frequency']} 
-rx-frequency  {config['radio_params']['rx_frequency']} 
+tx-frequency  {tx_frequency} 
+rx-frequency  {rx_frequency} 
 tx-power  {config['radio_params']['tx_power']} 
 discription  To_{peer_suffix}_V1 
 operation-mode  {config['radio_params']['operation_mode']} 
@@ -569,12 +584,14 @@ if hasattr(st.session_state, 'config') and st.session_state.config:
     
     with col1:
         st.subheader(f"📍 {site_a_name}")
+        st.info(f"TX: {st.session_state.config['site_a']['tx_frequency']} KHz, RX: {st.session_state.config['site_a']['rx_frequency']} KHz")
         with st.expander(f"查看 {site_a_name} 脚本", expanded=True):
             st.code(script_a, language='bash')
         st.markdown(create_download_link(script_a, f"{site_a_name}.txt", "📥 下载脚本"), unsafe_allow_html=True)
     
     with col2:
         st.subheader(f"📍 {site_b_name}")
+        st.info(f"TX: {st.session_state.config['site_b']['tx_frequency']} KHz, RX: {st.session_state.config['site_b']['rx_frequency']} KHz")
         with st.expander(f"查看 {site_b_name} 脚本", expanded=True):
             st.code(script_b, language='bash')
         st.markdown(create_download_link(script_b, f"{site_b_name}.txt", "📥 下载脚本"), unsafe_allow_html=True)
@@ -586,10 +603,9 @@ if hasattr(st.session_state, 'config') and st.session_state.config:
 
 st.sidebar.markdown("---")
 st.sidebar.info("""
-**简化版本特性:**
+**修复频率映射版本:**
+✅ 正确的频率映射：A-TX = B-RX, A-RX = B-TX
 ✅ 并排脚本显示
-✅ 折叠页组织内容
-✅ 一键下载脚本
-✅ 清晰的布局
-✅ 完整的配置信息
+✅ 频率信息实时显示
+✅ 完整的调试信息
 """)
