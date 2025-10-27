@@ -11,7 +11,7 @@ st.set_page_config(
 )
 
 st.title("📡 ZTE微波开站脚本生成器")
-st.subheader("巴西项目专用 - Excel格式支持")
+st.subheader("巴西项目专用 - 修复数据读取")
 
 class DataProcessor:
     @staticmethod
@@ -87,18 +87,27 @@ class DataProcessor:
 
     @staticmethod
     def parse_datasheet_file(file):
-        """解析Datasheet文件 - 支持Excel格式"""
+        """解析Datasheet文件 - 从第二行开始读取数据"""
         try:
             if file.name.endswith('.csv'):
-                df = pd.read_csv(file)
+                # CSV文件：跳过第一行（表头），使用第二行作为列名
+                df = pd.read_csv(file, header=1)  # header=1 表示使用第二行作为列名
+                st.info("📋 使用第二行作为列名（CSV格式）")
             elif file.name.endswith(('.xlsx', '.xls')):
-                df = pd.read_excel(file)
+                # Excel文件：跳过第一行，使用第二行作为列名
+                df = pd.read_excel(file, header=1)  # header=1 表示使用第二行作为列名
+                st.info("📋 使用第二行作为列名（Excel格式）")
             else:
                 st.error("❌ 不支持的文件格式")
                 return None
             
             st.success(f"✅ Datasheet加载成功，共 {len(df)} 条记录")
-            st.info(f"📋 文件列名: {list(df.columns)}")
+            
+            # 显示处理后的列名和数据
+            st.info(f"📋 处理后的列名: {list(df.columns)}")
+            st.info(f"📊 前3行数据:")
+            st.dataframe(df.head(3))
+            
             return df
             
         except Exception as e:
@@ -108,10 +117,22 @@ class DataProcessor:
     @staticmethod
     def find_chave_column(datasheet_data):
         """查找CHAVE列"""
-        chave_columns = ['Chave', 'CHAVE', 'chave', '站点编号']
+        chave_columns = ['Chave', 'CHAVE', 'chave', '站点编号', 'Unnamed: 0']
+        
+        # 显示所有列名用于调试
+        st.info(f"🔍 正在查找CHAVE列，可用列: {list(datasheet_data.columns)}")
+        
         for col in chave_columns:
             if col in datasheet_data.columns:
+                st.success(f"✅ 找到CHAVE列: '{col}'")
                 return col
+        
+        # 如果没有找到标准列名，尝试查找包含'chave'的列
+        for col in datasheet_data.columns:
+            if 'chave' in str(col).lower():
+                st.success(f"✅ 找到CHAVE列（模糊匹配）: '{col}'")
+                return col
+        
         return None
     
     @staticmethod
@@ -126,26 +147,49 @@ class DataProcessor:
             st.error("❌ 未找到CHAVE列")
             return None
         
-        # 查找匹配的CHAVE
+        # 清理CHAVE列数据
         datasheet_data[chave_col] = datasheet_data[chave_col].astype(str).str.strip()
+        
+        # 显示CHAVE列的所有值用于调试
+        unique_chaves = datasheet_data[chave_col].unique()
+        st.info(f"📋 CHAVE列中的所有值: {list(unique_chaves)}")
+        
+        # 查找匹配的CHAVE
         matches = datasheet_data[datasheet_data[chave_col] == chave_number.strip()]
         
         if len(matches) == 0:
             st.error(f"❌ 未找到CHAVE: {chave_number}")
+            st.info(f"💡 请检查CHAVE号码是否正确。可用的CHAVE值: {list(unique_chaves)}")
             return None
         
         match_data = matches.iloc[0]
         st.success(f"✅ 找到CHAVE配置")
         
-        # 提取站点名称 (L/M列)
-        site_a = str(match_data.get('L', '')).strip() if 'L' in match_data else None
-        site_b = str(match_data.get('M', '')).strip() if 'M' in match_data else None
+        # 显示匹配的完整数据用于调试
+        st.info("📊 匹配的完整数据:")
+        st.dataframe(matches)
+        
+        # 提取站点名称 (L/M列) - 使用字母列名
+        site_a = None
+        site_b = None
+        
+        # 尝试不同的列名格式
+        for col in ['L', 'M', 'Unnamed: 11', 'Unnamed: 12']:  # L和M列可能被重命名
+            if col in match_data:
+                if site_a is None:
+                    site_a = str(match_data[col]).strip()
+                    st.info(f"✅ 找到站点A ({col}): {site_a}")
+                else:
+                    site_b = str(match_data[col]).strip()
+                    st.info(f"✅ 找到站点B ({col}): {site_b}")
+                    break
         
         if not site_a or not site_b:
             st.error("❌ 未找到站点名称(L/M列)")
+            st.info(f"💡 可用的列: {list(match_data.index)}")
             return None
         
-        st.info(f"📡 站点: {site_a} ↔ {site_b}")
+        st.success(f"📡 关联站点: {site_a} ↔ {site_b}")
         
         # 在DCN中查找站点信息
         site_a_info = None
@@ -155,18 +199,45 @@ class DataProcessor:
             site_name = str(site_row.get('站点名称', '')).strip()
             if site_a in site_name:
                 site_a_info = site_row.to_dict()
+                st.info(f"✅ 在DCN中找到站点A: {site_name}")
             if site_b in site_name:
                 site_b_info = site_row.to_dict()
+                st.info(f"✅ 在DCN中找到站点B: {site_name}")
         
         # 提取设备名称 (N/O列) 并转换 NO → ZT
-        device_a = str(match_data.get('N', '')).strip().replace('NO', 'ZT') if 'N' in match_data else f"设备A_{chave_number}"
-        device_b = str(match_data.get('O', '')).strip().replace('NO', 'ZT') if 'O' in match_data else f"设备B_{chave_number}"
+        device_a = None
+        device_b = None
+        
+        for col in ['N', 'O', 'Unnamed: 13', 'Unnamed: 14']:  # N和O列可能被重命名
+            if col in match_data:
+                if device_a is None:
+                    device_a = str(match_data[col]).strip()
+                    st.info(f"✅ 找到设备A ({col}): {device_a}")
+                else:
+                    device_b = str(match_data[col]).strip()
+                    st.info(f"✅ 找到设备B ({col}): {device_b}")
+                    break
+        
+        # 设备名转换 NO → ZT
+        if device_a:
+            device_a = device_a.replace('NO', 'ZT')
+            st.info(f"🔄 设备A转换后: {device_a}")
+        else:
+            device_a = f"设备A_{chave_number}"
+            
+        if device_b:
+            device_b = device_b.replace('NO', 'ZT')
+            st.info(f"🔄 设备B转换后: {device_b}")
+        else:
+            device_b = f"设备B_{chave_number}"
         
         # 提取无线参数
         bandwidth = match_data.get('AN', 112000)
         tx_power = match_data.get('AS', 220)
         tx_freq = match_data.get('DR', 14977000)
         rx_freq = match_data.get('DS', 14577000)
+        
+        st.info(f"📡 无线参数: 带宽={bandwidth}, 功率={tx_power}, 发射={tx_freq}, 接收={rx_freq}")
         
         config = {
             'chave_number': chave_number,
@@ -256,15 +327,9 @@ generator = ZTEScriptGenerator()
 
 if dcn_file:
     st.session_state.dcn_data = processor.parse_dcn_file(dcn_file)
-    if st.session_state.dcn_data is not None:
-        st.write("DCN数据预览:")
-        st.dataframe(st.session_state.dcn_data.head(3))
 
 if datasheet_file:
     st.session_state.datasheet_data = processor.parse_datasheet_file(datasheet_file)
-    if st.session_state.datasheet_data is not None:
-        st.write("Datasheet预览:")
-        st.dataframe(st.session_state.datasheet_data.head(3))
 
 # CHAVE输入和脚本生成
 st.markdown("---")
@@ -316,10 +381,9 @@ if hasattr(st.session_state, 'script_b'):
 
 st.sidebar.markdown("---")
 st.sidebar.info("""
-**功能特性:**
-✅ 支持Excel格式 (XLSX/XLS)
-✅ 自动CHAVE匹配
-✅ 设备名转换 NO → ZT
-✅ 无线参数自动提取
-✅ 双站点脚本生成
+**修复说明:**
+✅ 从第二行开始读取数据
+✅ 增强列名识别
+✅ 详细的调试信息
+✅ 支持Excel格式
 """)
