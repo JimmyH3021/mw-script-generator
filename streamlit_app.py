@@ -11,7 +11,7 @@ st.set_page_config(
 )
 
 st.title("📡 ZTE微波开站脚本生成器")
-st.subheader("巴西项目专用 - 修复数据读取")
+st.subheader("巴西项目专用 - 修复列名识别")
 
 class DataProcessor:
     @staticmethod
@@ -91,11 +91,11 @@ class DataProcessor:
         try:
             if file.name.endswith('.csv'):
                 # CSV文件：跳过第一行（表头），使用第二行作为列名
-                df = pd.read_csv(file, header=1)  # header=1 表示使用第二行作为列名
+                df = pd.read_csv(file, header=1)
                 st.info("📋 使用第二行作为列名（CSV格式）")
             elif file.name.endswith(('.xlsx', '.xls')):
                 # Excel文件：跳过第一行，使用第二行作为列名
-                df = pd.read_excel(file, header=1)  # header=1 表示使用第二行作为列名
+                df = pd.read_excel(file, header=1)
                 st.info("📋 使用第二行作为列名（Excel格式）")
             else:
                 st.error("❌ 不支持的文件格式")
@@ -117,7 +117,7 @@ class DataProcessor:
     @staticmethod
     def find_chave_column(datasheet_data):
         """查找CHAVE列"""
-        chave_columns = ['Chave', 'CHAVE', 'chave', '站点编号', 'Unnamed: 0']
+        chave_columns = ['Chave', 'CHAVE', 'chave', '站点编号']
         
         # 显示所有列名用于调试
         st.info(f"🔍 正在查找CHAVE列，可用列: {list(datasheet_data.columns)}")
@@ -169,24 +169,45 @@ class DataProcessor:
         st.info("📊 匹配的完整数据:")
         st.dataframe(matches)
         
-        # 提取站点名称 (L/M列) - 使用字母列名
+        # 提取站点名称 - 使用正确的列名
         site_a = None
         site_b = None
         
-        # 尝试不同的列名格式
-        for col in ['L', 'M', 'Unnamed: 11', 'Unnamed: 12']:  # L和M列可能被重命名
+        # 站点名称列名（根据你提供的信息）
+        site_columns = [
+            'Site ID Estação 1', 'Site ID Estação 2',
+            'Site ID Estacao 1', 'Site ID Estacao 2',
+            'Site ID Estação1', 'Site ID Estação2',
+            'Site ID Estacao1', 'Site ID Estacao2'
+        ]
+        
+        for col in site_columns:
             if col in match_data:
                 if site_a is None:
                     site_a = str(match_data[col]).strip()
-                    st.info(f"✅ 找到站点A ({col}): {site_a}")
-                else:
+                    st.success(f"✅ 找到站点A ({col}): {site_a}")
+                elif site_b is None:
                     site_b = str(match_data[col]).strip()
-                    st.info(f"✅ 找到站点B ({col}): {site_b}")
+                    st.success(f"✅ 找到站点B ({col}): {site_b}")
                     break
         
+        # 如果没找到，尝试其他可能的列名
         if not site_a or not site_b:
-            st.error("❌ 未找到站点名称(L/M列)")
-            st.info(f"💡 可用的列: {list(match_data.index)}")
+            for col in match_data.index:
+                if 'site' in str(col).lower() or 'estação' in str(col).lower() or 'estacao' in str(col).lower():
+                    value = str(match_data[col]).strip()
+                    if value and value != 'nan':
+                        if site_a is None:
+                            site_a = value
+                            st.info(f"🔍 找到站点A ({col}): {site_a}")
+                        else:
+                            site_b = value
+                            st.info(f"🔍 找到站点B ({col}): {site_b}")
+                            break
+        
+        if not site_a or not site_b:
+            st.error("❌ 未找到站点名称")
+            st.info(f"💡 请检查Datasheet中站点名称的列名。所有可用列: {list(match_data.index)}")
             return None
         
         st.success(f"📡 关联站点: {site_a} ↔ {site_b}")
@@ -199,24 +220,47 @@ class DataProcessor:
             site_name = str(site_row.get('站点名称', '')).strip()
             if site_a in site_name:
                 site_a_info = site_row.to_dict()
-                st.info(f"✅ 在DCN中找到站点A: {site_name}")
+                st.success(f"✅ 在DCN中找到站点A: {site_name}")
             if site_b in site_name:
                 site_b_info = site_row.to_dict()
-                st.info(f"✅ 在DCN中找到站点B: {site_name}")
+                st.success(f"✅ 在DCN中找到站点B: {site_name}")
         
-        # 提取设备名称 (N/O列) 并转换 NO → ZT
+        # 提取设备名称 - 使用正确的列名
         device_a = None
         device_b = None
         
-        for col in ['N', 'O', 'Unnamed: 13', 'Unnamed: 14']:  # N和O列可能被重命名
+        # 设备名称列名
+        device_columns = [
+            'NE ID Estação 1', 'NE ID Estação 2',
+            'NE ID Estacao 1', 'NE ID Estacao 2',
+            'NE ID Estação1', 'NE ID Estação2',
+            'NE ID Estacao1', 'NE ID Estacao2',
+            'Equipment Estação 1', 'Equipment Estação 2'
+        ]
+        
+        for col in device_columns:
             if col in match_data:
                 if device_a is None:
                     device_a = str(match_data[col]).strip()
-                    st.info(f"✅ 找到设备A ({col}): {device_a}")
-                else:
+                    st.success(f"✅ 找到设备A ({col}): {device_a}")
+                elif device_b is None:
                     device_b = str(match_data[col]).strip()
-                    st.info(f"✅ 找到设备B ({col}): {device_b}")
+                    st.success(f"✅ 找到设备B ({col}): {device_b}")
                     break
+        
+        # 如果没找到，尝试其他可能的列名
+        if not device_a or not device_b:
+            for col in match_data.index:
+                if 'ne' in str(col).lower() or 'equipment' in str(col).lower():
+                    value = str(match_data[col]).strip()
+                    if value and value != 'nan':
+                        if device_a is None:
+                            device_a = value
+                            st.info(f"🔍 找到设备A ({col}): {device_a}")
+                        else:
+                            device_b = value
+                            st.info(f"🔍 找到设备B ({col}): {device_b}")
+                            break
         
         # 设备名转换 NO → ZT
         if device_a:
@@ -232,12 +276,40 @@ class DataProcessor:
             device_b = f"设备B_{chave_number}"
         
         # 提取无线参数
-        bandwidth = match_data.get('AN', 112000)
-        tx_power = match_data.get('AS', 220)
-        tx_freq = match_data.get('DR', 14977000)
-        rx_freq = match_data.get('DS', 14577000)
+        bandwidth_columns = ['AN', 'Bandwidth', 'Largura de Banda']
+        tx_power_columns = ['AS', 'TX Power', 'Potência TX']
+        tx_freq_columns = ['DR', 'TX Frequency', 'Frequência TX']
+        rx_freq_columns = ['DS', 'RX Frequency', 'Frequência RX']
         
-        st.info(f"📡 无线参数: 带宽={bandwidth}, 功率={tx_power}, 发射={tx_freq}, 接收={rx_freq}")
+        bandwidth = 112000
+        tx_power = 220
+        tx_freq = 14977000
+        rx_freq = 14577000
+        
+        # 查找参数
+        for col in bandwidth_columns:
+            if col in match_data:
+                bandwidth = match_data[col]
+                st.info(f"📡 带宽 ({col}): {bandwidth}")
+                break
+        
+        for col in tx_power_columns:
+            if col in match_data:
+                tx_power = match_data[col]
+                st.info(f"📡 发射功率 ({col}): {tx_power}")
+                break
+        
+        for col in tx_freq_columns:
+            if col in match_data:
+                tx_freq = match_data[col]
+                st.info(f"📡 发射频率 ({col}): {tx_freq}")
+                break
+        
+        for col in rx_freq_columns:
+            if col in match_data:
+                rx_freq = match_data[col]
+                st.info(f"📡 接收频率 ({col}): {rx_freq}")
+                break
         
         config = {
             'chave_number': chave_number,
@@ -382,8 +454,8 @@ if hasattr(st.session_state, 'script_b'):
 st.sidebar.markdown("---")
 st.sidebar.info("""
 **修复说明:**
-✅ 从第二行开始读取数据
-✅ 增强列名识别
+✅ 使用正确的列名: Site ID Estação 1/2
+✅ 支持葡萄牙语列名
 ✅ 详细的调试信息
-✅ 支持Excel格式
+✅ 增强列名匹配
 """)
