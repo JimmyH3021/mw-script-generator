@@ -12,7 +12,7 @@ st.set_page_config(
 )
 
 st.title("📡 ZTE微波开站脚本生成器")
-st.subheader("简化版本 - 修复频率映射问题")
+st.subheader("简化版本 - 修复功率值计算")
 
 class DataProcessor:
     @staticmethod
@@ -231,7 +231,7 @@ class DataProcessor:
         
         # 提取无线参数
         bandwidth = match_data.get(detected_columns.get('bandwidth'), 112)
-        tx_power = match_data.get(detected_columns.get('tx_power'), 220)
+        tx_power_raw = match_data.get(detected_columns.get('tx_power'), 22)  # 原始值，如22
         tx_freq_a = match_data.get(detected_columns.get('tx_freq'), 14977)  # 站点A的发射频率
         rx_freq_a = match_data.get(detected_columns.get('rx_freq'), 14577)  # 站点A的接收频率
         
@@ -239,6 +239,9 @@ class DataProcessor:
         bandwidth_khz = int(bandwidth) * 1000
         tx_freq_a_khz = int(tx_freq_a) * 1000
         rx_freq_a_khz = int(rx_freq_a) * 1000
+        
+        # 修正功率值：Datasheet中的值是实际值的1/10，需要乘以10
+        tx_power_corrected = int(tx_power_raw) * 10
         
         # 站点B的频率应该是站点A的相反
         # 站点B的TX频率 = 站点A的RX频率
@@ -248,7 +251,7 @@ class DataProcessor:
         
         st.info(f"📡 无线参数:")
         st.info(f"  - 带宽: {bandwidth}MHz → {bandwidth_khz}KHz")
-        st.info(f"  - 功率: {tx_power}dBm")
+        st.info(f"  - 功率: {tx_power_raw}dBm(原始) → {tx_power_corrected}dBm(修正)")
         st.info(f"  - 站点A: TX={tx_freq_a}MHz→{tx_freq_a_khz}KHz, RX={rx_freq_a}MHz→{rx_freq_a_khz}KHz")
         st.info(f"  - 站点B: TX={rx_freq_a}MHz→{tx_freq_b_khz}KHz, RX={tx_freq_a}MHz→{rx_freq_b_khz}KHz")
         
@@ -285,7 +288,7 @@ class DataProcessor:
             },
             'radio_params': {
                 'bandwidth': bandwidth_khz,
-                'tx_power': int(tx_power),
+                'tx_power': tx_power_corrected,  # 使用修正后的功率值
                 'modulation': 'bpsk',
                 'operation_mode': 'G02'
             }
@@ -368,9 +371,9 @@ snmp-server host    10.103.67.13 trap version 3 priv  zte udp-port 162 snmp
 
 snmp-server host    10.216.59.50 trap version 3 priv  telco_zte udp-port 162 snmp 
 
-snmp-server host    10.192.67.183 trap版本 3 priv  telco_zte udp-port 162 snmp 
+snmp-server host    10.192.67.183 trap version 3 priv  telco_zte udp-port 162 snmp 
 
-snmp-server host    10.221.63.226 trap版本 3 priv  telco_zte udp-port 162 snmp 
+snmp-server host    10.221.63.226 trap version 3 priv  telco_zte udp-port 162 snmp 
 
 
 radio-group xpic
@@ -584,14 +587,18 @@ if hasattr(st.session_state, 'config') and st.session_state.config:
     
     with col1:
         st.subheader(f"📍 {site_a_name}")
-        st.info(f"TX: {st.session_state.config['site_a']['tx_frequency']} KHz, RX: {st.session_state.config['site_a']['rx_frequency']} KHz")
+        st.info(f"TX: {st.session_state.config['site_a']['tx_frequency']} KHz")
+        st.info(f"RX: {st.session_state.config['site_a']['rx_frequency']} KHz")
+        st.info(f"功率: {st.session_state.config['radio_params']['tx_power']} dBm")
         with st.expander(f"查看 {site_a_name} 脚本", expanded=True):
             st.code(script_a, language='bash')
         st.markdown(create_download_link(script_a, f"{site_a_name}.txt", "📥 下载脚本"), unsafe_allow_html=True)
     
     with col2:
         st.subheader(f"📍 {site_b_name}")
-        st.info(f"TX: {st.session_state.config['site_b']['tx_frequency']} KHz, RX: {st.session_state.config['site_b']['rx_frequency']} KHz")
+        st.info(f"TX: {st.session_state.config['site_b']['tx_frequency']} KHz")
+        st.info(f"RX: {st.session_state.config['site_b']['rx_frequency']} KHz")
+        st.info(f"功率: {st.session_state.config['radio_params']['tx_power']} dBm")
         with st.expander(f"查看 {site_b_name} 脚本", expanded=True):
             st.code(script_b, language='bash')
         st.markdown(create_download_link(script_b, f"{site_b_name}.txt", "📥 下载脚本"), unsafe_allow_html=True)
@@ -603,9 +610,9 @@ if hasattr(st.session_state, 'config') and st.session_state.config:
 
 st.sidebar.markdown("---")
 st.sidebar.info("""
-**修复频率映射版本:**
-✅ 正确的频率映射：A-TX = B-RX, A-RX = B-TX
+**修复功率值版本:**
+✅ 功率值修正：Datasheet值 × 10
+✅ 正确的频率映射
 ✅ 并排脚本显示
-✅ 频率信息实时显示
-✅ 完整的调试信息
+✅ 完整的参数显示
 """)
