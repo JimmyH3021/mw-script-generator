@@ -12,7 +12,7 @@ st.set_page_config(
 )
 
 st.title("📡 ZTE微波开站脚本生成器")
-st.subheader("简化版本 - 修复功率值计算")
+st.subheader("简化版本 - 日志信息折叠")
 
 class DataProcessor:
     @staticmethod
@@ -42,7 +42,6 @@ class DataProcessor:
             
             # 数据清理
             df = DataProcessor.clean_dcn_data(df)
-            st.success(f"✅ DCN文件加载成功，共 {len(df)} 条记录")
             return df
             
         except Exception as e:
@@ -95,8 +94,6 @@ class DataProcessor:
             else:
                 st.error("❌ 不支持的文件格式")
                 return None
-            
-            st.success(f"✅ Datasheet加载成功，共 {len(df)} 条记录")
                 
             return df
             
@@ -105,7 +102,7 @@ class DataProcessor:
             return None
     
     @staticmethod
-    def auto_detect_columns(datasheet_data):
+    def auto_detect_columns(datasheet_data, log_container):
         """自动检测列名 - 修复换行符问题"""
         detected_columns = {}
         
@@ -127,14 +124,6 @@ class DataProcessor:
             cleaned_col = re.sub(r'\s*\n\s*', ' ', str(actual_col).strip())
             cleaned_columns[cleaned_col] = actual_col
         
-        # 在折叠页中显示列名信息
-        with st.expander("📋 Datasheet列名详情", expanded=False):
-            st.info("实际列名与清理后列名对比:")
-            for i, (cleaned_col, actual_col) in enumerate(cleaned_columns.items()):
-                st.write(f"{i:2d}. 原始: '{actual_col}'")
-                st.write(f"    清理: '{cleaned_col}'")
-                st.write("---")
-        
         # 检查每个列是否存在（使用清理后的列名）
         for col_type, expected_col in column_mapping.items():
             # 清理预期列名
@@ -143,42 +132,42 @@ class DataProcessor:
             if cleaned_expected in cleaned_columns:
                 actual_col_name = cleaned_columns[cleaned_expected]
                 detected_columns[col_type] = actual_col_name
-                st.success(f"✅ 找到{col_type}列: '{actual_col_name}'")
+                log_container.success(f"✅ 找到{col_type}列: '{actual_col_name}'")
             else:
-                st.error(f"❌ 未找到{col_type}列: '{cleaned_expected}'")
+                log_container.error(f"❌ 未找到{col_type}列: '{cleaned_expected}'")
                 
                 # 尝试部分匹配
                 found = False
                 for cleaned_col, actual_col in cleaned_columns.items():
                     if any(keyword in cleaned_col for keyword in expected_col.split()[:2]):
                         detected_columns[col_type] = actual_col
-                        st.warning(f"⚠️ 使用部分匹配 {col_type}: '{actual_col}'")
+                        log_container.warning(f"⚠️ 使用部分匹配 {col_type}: '{actual_col}'")
                         found = True
                         break
                 
                 if not found:
-                    st.error(f"❌ 无法匹配 {col_type} 列，请检查文件格式")
+                    log_container.error(f"❌ 无法匹配 {col_type} 列，请检查文件格式")
         
         return detected_columns
     
     @staticmethod
-    def find_site_config(dcn_data, datasheet_data, chave_number):
+    def find_site_config(dcn_data, datasheet_data, chave_number, log_container):
         """根据CHAVE查找完整配置"""
         if dcn_data is None or datasheet_data is None:
             return None
         
-        st.info(f"🔍 正在查找CHAVE: {chave_number}")
+        log_container.info(f"🔍 正在查找CHAVE: {chave_number}")
         
         # 自动检测列名
-        detected_columns = DataProcessor.auto_detect_columns(datasheet_data)
+        detected_columns = DataProcessor.auto_detect_columns(datasheet_data, log_container)
         
         # 检查必要列
         required_columns = ['chave', 'site_a', 'site_b', 'device']
         missing_columns = [col for col in required_columns if col not in detected_columns]
         
         if missing_columns:
-            st.error(f"❌ 缺少必要的列: {missing_columns}")
-            st.info("💡 请检查Datasheet文件格式，或手动指定列名")
+            log_container.error(f"❌ 缺少必要的列: {missing_columns}")
+            log_container.info("💡 请检查Datasheet文件格式，或手动指定列名")
             return None
         
         # 查找匹配的CHAVE
@@ -187,31 +176,31 @@ class DataProcessor:
         matches = datasheet_data[datasheet_data[chave_col] == chave_number.strip()]
         
         if len(matches) == 0:
-            st.error(f"❌ 未找到CHAVE: {chave_number}")
+            log_container.error(f"❌ 未找到CHAVE: {chave_number}")
             # 显示可用的CHAVE值
             unique_chaves = datasheet_data[chave_col].unique()[:10]  # 只显示前10个
-            st.info(f"可用的CHAVE值: {list(unique_chaves)}")
+            log_container.info(f"可用的CHAVE值: {list(unique_chaves)}")
             return None
         
         match_data = matches.iloc[0]
-        st.success(f"✅ 找到CHAVE配置")
+        log_container.success(f"✅ 找到CHAVE配置")
         
         # 提取站点和设备信息
         site_a = str(match_data.get(detected_columns['site_a'], '')).strip()
         site_b = str(match_data.get(detected_columns['site_b'], '')).strip()
         device_name = str(match_data.get(detected_columns['device'], '')).strip()
         
-        st.info(f"📡 站点A: {site_a}")
-        st.info(f"📡 站点B: {site_b}")
-        st.info(f"🖥️  设备: {device_name}")
+        log_container.info(f"📡 站点A: {site_a}")
+        log_container.info(f"📡 站点B: {site_b}")
+        log_container.info(f"🖥️  设备: {device_name}")
         
         if not site_a or not site_b or not device_name:
-            st.error("❌ 缺少必要的站点或设备信息")
+            log_container.error("❌ 缺少必要的站点或设备信息")
             return None
         
         # 设备名转换 NO → ZT
         device_name = device_name.replace('NO', 'ZT')
-        st.info(f"🔄 设备名转换后: {device_name}")
+        log_container.info(f"🔄 设备名转换后: {device_name}")
         
         # 在DCN中查找站点信息
         site_a_info = None
@@ -221,13 +210,13 @@ class DataProcessor:
             site_name = str(site_row.get('站点名称', '')).strip()
             if site_a in site_name:
                 site_a_info = site_row.to_dict()
-                st.success(f"✅ 在DCN中找到站点A: {site_name}")
+                log_container.success(f"✅ 在DCN中找到站点A: {site_name}")
             if site_b in site_name:
                 site_b_info = site_row.to_dict()
-                st.success(f"✅ 在DCN中找到站点B: {site_name}")
+                log_container.success(f"✅ 在DCN中找到站点B: {site_name}")
         
         if not site_a_info or not site_b_info:
-            st.warning("⚠️ 在DCN中未找到完整的站点信息，使用默认值")
+            log_container.warning("⚠️ 在DCN中未找到完整的站点信息，使用默认值")
         
         # 提取无线参数
         bandwidth = match_data.get(detected_columns.get('bandwidth'), 112)
@@ -249,11 +238,11 @@ class DataProcessor:
         tx_freq_b_khz = rx_freq_a_khz
         rx_freq_b_khz = tx_freq_a_khz
         
-        st.info(f"📡 无线参数:")
-        st.info(f"  - 带宽: {bandwidth}MHz → {bandwidth_khz}KHz")
-        st.info(f"  - 功率: {tx_power_raw}dBm(原始) → {tx_power_corrected}dBm(修正)")
-        st.info(f"  - 站点A: TX={tx_freq_a}MHz→{tx_freq_a_khz}KHz, RX={rx_freq_a}MHz→{rx_freq_a_khz}KHz")
-        st.info(f"  - 站点B: TX={rx_freq_a}MHz→{tx_freq_b_khz}KHz, RX={tx_freq_a}MHz→{rx_freq_b_khz}KHz")
+        log_container.info(f"📡 无线参数:")
+        log_container.info(f"  - 带宽: {bandwidth}MHz → {bandwidth_khz}KHz")
+        log_container.info(f"  - 功率: {tx_power_raw}dBm(原始) → {tx_power_corrected}dBm(修正)")
+        log_container.info(f"  - 站点A: TX={tx_freq_a}MHz→{tx_freq_a_khz}KHz, RX={rx_freq_a}MHz→{rx_freq_a_khz}KHz")
+        log_container.info(f"  - 站点B: TX={rx_freq_a}MHz→{tx_freq_b_khz}KHz, RX={tx_freq_a}MHz→{rx_freq_b_khz}KHz")
         
         # 计算网关
         def calculate_gateway(ip_with_subnet):
@@ -539,6 +528,8 @@ if 'datasheet_data' not in st.session_state:
     st.session_state.datasheet_data = None
 if 'config' not in st.session_state:
     st.session_state.config = None
+if 'processing_log' not in st.session_state:
+    st.session_state.processing_log = []
 
 # 文件上传
 st.sidebar.header("文件上传")
@@ -551,20 +542,30 @@ generator = ZTEScriptGenerator()
 
 if dcn_file:
     st.session_state.dcn_data = processor.parse_dcn_file(dcn_file)
+    if st.session_state.dcn_data is not None:
+        st.success(f"✅ DCN文件加载成功，共 {len(st.session_state.dcn_data)} 条记录")
 
 if datasheet_file:
     st.session_state.datasheet_data = processor.parse_datasheet_file(datasheet_file)
+    if st.session_state.datasheet_data is not None:
+        st.success(f"✅ Datasheet加载成功，共 {len(st.session_state.datasheet_data)} 条记录")
 
 # CHAVE输入和脚本生成
 st.markdown("---")
 chave_number = st.text_input("输入CHAVE号码:", placeholder="例如: CODV29, 4G-CORD10")
 
 if chave_number and st.session_state.dcn_data is not None and st.session_state.datasheet_data is not None:
-    config = processor.find_site_config(
-        st.session_state.dcn_data, 
-        st.session_state.datasheet_data, 
-        chave_number
-    )
+    # 创建日志容器
+    with st.expander("📋 处理日志", expanded=False):
+        log_container = st.container()
+        
+        with log_container:
+            config = processor.find_site_config(
+                st.session_state.dcn_data, 
+                st.session_state.datasheet_data, 
+                chave_number,
+                log_container
+            )
     
     if config:
         st.session_state.config = config
@@ -610,9 +611,9 @@ if hasattr(st.session_state, 'config') and st.session_state.config:
 
 st.sidebar.markdown("---")
 st.sidebar.info("""
-**修复功率值版本:**
-✅ 功率值修正：Datasheet值 × 10
-✅ 正确的频率映射
-✅ 并排脚本显示
-✅ 完整的参数显示
+**日志折叠版本:**
+✅ 所有处理信息折叠到日志中
+✅ 界面更加简洁
+✅ 完整的调试信息
+✅ 一键查看处理过程
 """)
