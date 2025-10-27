@@ -11,7 +11,7 @@ st.set_page_config(
 )
 
 st.title("📡 ZTE微波开站脚本生成器")
-st.subheader("直接从第二行识别列名")
+st.subheader("自动列名匹配版本")
 
 class DataProcessor:
     @staticmethod
@@ -82,10 +82,8 @@ class DataProcessor:
         """解析Datasheet文件 - 直接从第二行开始"""
         try:
             if file.name.endswith('.csv'):
-                # 从第二行开始读取，使用第二行作为列名
                 df = pd.read_csv(file, header=1)
             elif file.name.endswith(('.xlsx', '.xls')):
-                # 从第二行开始读取，使用第二行作为列名
                 df = pd.read_excel(file, header=1)
             else:
                 st.error("❌ 不支持的文件格式")
@@ -93,22 +91,79 @@ class DataProcessor:
             
             st.success(f"✅ Datasheet加载成功，共 {len(df)} 条记录")
             
-            # 显示处理后的列名
-            st.info("📋 从第二行识别的列名:")
-            columns_info = []
+            # 显示列名信息
+            st.info("📋 识别的列名:")
             for i, col in enumerate(df.columns):
-                columns_info.append(f"{i}: '{col}'")
-            st.write(", ".join(columns_info))
-            
-            # 显示前3行数据
-            st.info("📊 前3行数据:")
-            st.dataframe(df.head(3))
+                st.write(f"{i}: '{col}'")
             
             return df
             
         except Exception as e:
             st.error(f"❌ Datasheet解析失败: {e}")
             return None
+    
+    @staticmethod
+    def auto_detect_columns(datasheet_data):
+        """自动检测列名"""
+        detected_columns = {}
+        
+        # CHAVE列
+        chave_columns = ['Chave', 'CHAVE', 'chave']
+        for col in chave_columns:
+            if col in datasheet_data.columns:
+                detected_columns['chave'] = col
+                break
+        
+        # 站点A列
+        site_a_columns = ['Site ID Estação 1', 'Site ID Estacao 1']
+        for col in site_a_columns:
+            if col in datasheet_data.columns:
+                detected_columns['site_a'] = col
+                break
+        
+        # 站点B列
+        site_b_columns = ['Site ID Estação 2', 'Site ID Estacao 2']
+        for col in site_b_columns:
+            if col in datasheet_data.columns:
+                detected_columns['site_b'] = col
+                break
+        
+        # 设备列
+        device_columns = ['Nome Elemento Estação 1', 'Nome Elemento Estacao 1']
+        for col in device_columns:
+            if col in datasheet_data.columns:
+                detected_columns['device'] = col
+                break
+        
+        # 带宽列
+        bandwidth_columns = ['Largura de banda do canal (MHz)']
+        for col in bandwidth_columns:
+            if col in datasheet_data.columns:
+                detected_columns['bandwidth'] = col
+                break
+        
+        # 发射功率列
+        tx_power_columns = ['Potência TX máxima (dBm)']
+        for col in tx_power_columns:
+            if col in datasheet_data.columns:
+                detected_columns['tx_power'] = col
+                break
+        
+        # 发射频率列
+        tx_freq_columns = ['Frequência Central Estação 1 (MHz)']
+        for col in tx_freq_columns:
+            if col in datasheet_data.columns:
+                detected_columns['tx_freq'] = col
+                break
+        
+        # 接收频率列
+        rx_freq_columns = ['Frequência Central Estação 2 (MHz)']
+        for col in rx_freq_columns:
+            if col in datasheet_data.columns:
+                detected_columns['rx_freq'] = col
+                break
+        
+        return detected_columns
     
     @staticmethod
     def find_site_config(dcn_data, datasheet_data, chave_number):
@@ -118,25 +173,24 @@ class DataProcessor:
         
         st.info(f"🔍 正在查找CHAVE: {chave_number}")
         
-        # 显示所有列名用于选择
-        st.info("📋 请从以下列名中选择对应的列:")
+        # 自动检测列名
+        detected_columns = DataProcessor.auto_detect_columns(datasheet_data)
         
-        # 创建列选择界面
-        col1, col2, col3, col4 = st.columns(4)
+        # 显示检测到的列名
+        st.success("✅ 自动检测到以下列名:")
+        for col_type, col_name in detected_columns.items():
+            st.write(f"  {col_type}: '{col_name}'")
         
-        with col1:
-            chave_col = st.selectbox("选择CHAVE列", options=datasheet_data.columns.tolist(), key="chave_col")
+        # 检查是否所有必要列都已找到
+        required_columns = ['chave', 'site_a', 'site_b', 'device']
+        missing_columns = [col for col in required_columns if col not in detected_columns]
         
-        with col2:
-            site_a_col = st.selectbox("选择站点A列", options=datasheet_data.columns.tolist(), key="site_a_col")
-        
-        with col3:
-            site_b_col = st.selectbox("选择站点B列", options=datasheet_data.columns.tolist(), key="site_b_col")
-        
-        with col4:
-            device_col = st.selectbox("选择设备列", options=datasheet_data.columns.tolist(), key="device_col")
+        if missing_columns:
+            st.error(f"❌ 缺少必要的列: {missing_columns}")
+            return None
         
         # 查找匹配的CHAVE
+        chave_col = detected_columns['chave']
         datasheet_data[chave_col] = datasheet_data[chave_col].astype(str).str.strip()
         matches = datasheet_data[datasheet_data[chave_col] == chave_number.strip()]
         
@@ -151,9 +205,9 @@ class DataProcessor:
         st.success(f"✅ 找到CHAVE配置")
         
         # 提取站点和设备信息
-        site_a = str(match_data.get(site_a_col, '')).strip()
-        site_b = str(match_data.get(site_b_col, '')).strip()
-        device_name = str(match_data.get(device_col, '')).strip()
+        site_a = str(match_data.get(detected_columns['site_a'], '')).strip()
+        site_b = str(match_data.get(detected_columns['site_b'], '')).strip()
+        device_name = str(match_data.get(detected_columns['device'], '')).strip()
         
         st.info(f"📡 站点A: {site_a}")
         st.info(f"📡 站点B: {site_b}")
@@ -180,29 +234,24 @@ class DataProcessor:
                 site_b_info = site_row.to_dict()
                 st.success(f"✅ 在DCN中找到站点B: {site_name}")
         
-        # 提取无线参数 - 手动选择列
-        st.info("🎛️  请选择无线参数列:")
+        # 提取无线参数
+        bandwidth = match_data.get(detected_columns.get('bandwidth'), 112000)
+        tx_power = match_data.get(detected_columns.get('tx_power'), 220)
+        tx_freq = match_data.get(detected_columns.get('tx_freq'), 14977000)
+        rx_freq = match_data.get(detected_columns.get('rx_freq'), 14577000)
         
-        col5, col6, col7, col8 = st.columns(4)
+        # 转换频率单位 MHz → Hz
+        if tx_freq and tx_freq > 1000:  # 如果已经是Hz单位就不转换
+            tx_freq = int(tx_freq)
+        else:
+            tx_freq = int(tx_freq * 1000) if tx_freq else 14977000
         
-        with col5:
-            bandwidth_col = st.selectbox("选择带宽列", options=datasheet_data.columns.tolist(), key="bandwidth_col")
+        if rx_freq and rx_freq > 1000:
+            rx_freq = int(rx_freq)
+        else:
+            rx_freq = int(rx_freq * 1000) if rx_freq else 14577000
         
-        with col6:
-            tx_power_col = st.selectbox("选择发射功率列", options=datasheet_data.columns.tolist(), key="tx_power_col")
-        
-        with col7:
-            tx_freq_col = st.selectbox("选择发射频率列", options=datasheet_data.columns.tolist(), key="tx_freq_col")
-        
-        with col8:
-            rx_freq_col = st.selectbox("选择接收频率列", options=datasheet_data.columns.tolist(), key="rx_freq_col")
-        
-        bandwidth = match_data.get(bandwidth_col, 112000)
-        tx_power = match_data.get(tx_power_col, 220)
-        tx_freq = match_data.get(tx_freq_col, 14977000)
-        rx_freq = match_data.get(rx_freq_col, 14577000)
-        
-        st.info(f"📡 无线参数: 带宽={bandwidth}, 功率={tx_power}, 发射={tx_freq}, 接收={rx_freq}")
+        st.info(f"📡 无线参数: 带宽={bandwidth}MHz, 功率={tx_power}dBm, 发射={tx_freq}Hz, 接收={rx_freq}Hz")
         
         # 计算网关
         def calculate_gateway(ip_with_subnet):
@@ -219,20 +268,20 @@ class DataProcessor:
             'chave_number': chave_number,
             'site_a': {
                 'site_name': site_a,
-                'device_name': f"MWE-MG-{site_a}-N1-ZT",
+                'device_name': device_name,  # 使用实际的设备名称
                 'ip': site_a_info.get('IP地址') if site_a_info else '10.211.51.202',
                 'vlan': site_a_info.get('VLAN') if site_a_info else 2929,
                 'gateway': gateway_a
             },
             'site_b': {
                 'site_name': site_b,
-                'device_name': f"MWE-MG-{site_b}-N1-ZT",
+                'device_name': device_name.replace(site_a, site_b) if site_a in device_name else f"MWE-MG-{site_b}-N1-ZT",
                 'ip': site_b_info.get('IP地址') if site_b_info else '10.211.51.203',
                 'vlan': site_b_info.get('VLAN') if site_b_info else 2929,
                 'gateway': gateway_b
             },
             'radio_params': {
-                'bandwidth': bandwidth,
+                'bandwidth': bandwidth * 1000 if bandwidth and bandwidth < 1000 else bandwidth,  # MHz → KHz
                 'tx_power': tx_power,
                 'tx_frequency': tx_freq,
                 'rx_frequency': rx_freq,
@@ -243,6 +292,7 @@ class DataProcessor:
         
         return config
 
+# ZTEScriptGenerator 类保持不变
 class ZTEScriptGenerator:
     @staticmethod
     def generate_script(config, for_site_a=True):
@@ -546,10 +596,10 @@ if hasattr(st.session_state, 'script_b'):
 
 st.sidebar.markdown("---")
 st.sidebar.info("""
-**使用说明:**
-1. 上传DCN和Datasheet文件
-2. 查看从第二行识别的列名
-3. 手动选择对应的列
-4. 输入CHAVE号码
-5. 生成脚本
+**自动列名匹配:**
+✅ Chave - CHAVE列
+✅ Site ID Estação 1/2 - 站点列
+✅ Nome Elemento Estação 1 - 设备列
+✅ 自动单位转换
+✅ 设备名NO→ZT转换
 """)
