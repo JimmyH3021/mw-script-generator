@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import base64
 from datetime import datetime
+import re
 
 # 页面配置
 st.set_page_config(
@@ -11,7 +12,7 @@ st.set_page_config(
 )
 
 st.title("📡 ZTE微波开站脚本生成器")
-st.subheader("最终版本 - 自动列名匹配")
+st.subheader("最终版本 - 修复列名换行符问题")
 
 class DataProcessor:
     @staticmethod
@@ -79,17 +80,29 @@ class DataProcessor:
 
     @staticmethod
     def parse_datasheet_file(file):
-        """解析Datasheet文件 - 直接从第二行开始"""
+        """解析Datasheet文件 - 修复换行符问题"""
         try:
             if file.name.endswith('.csv'):
                 df = pd.read_csv(file, header=1)
             elif file.name.endswith(('.xlsx', '.xls')):
-                df = pd.read_excel(file, header=1)
+                # 先读取原始数据，处理列名中的换行符
+                df_raw = pd.read_excel(file, header=1)
+                
+                # 清理列名：移除换行符和多余空格
+                df_raw.columns = [re.sub(r'\s*\n\s*', ' ', str(col).strip()) for col in df_raw.columns]
+                
+                df = df_raw
             else:
                 st.error("❌ 不支持的文件格式")
                 return None
             
             st.success(f"✅ Datasheet加载成功，共 {len(df)} 条记录")
+            
+            # 显示列名用于调试
+            st.info("📋 Datasheet列名:")
+            for i, col in enumerate(df.columns):
+                st.write(f"  {i}: '{col}'")
+                
             return df
             
         except Exception as e:
@@ -98,10 +111,10 @@ class DataProcessor:
     
     @staticmethod
     def auto_detect_columns(datasheet_data):
-        """自动检测列名 - 使用已知的列名"""
+        """自动检测列名 - 修复换行符问题"""
         detected_columns = {}
         
-        # 已知的列名映射
+        # 清理后的列名映射（移除换行符）
         column_mapping = {
             'chave': 'Chave',
             'site_a': 'Site ID Estação 1', 
@@ -113,19 +126,38 @@ class DataProcessor:
             'rx_freq': 'Frequência Central Estação 2 (MHz)'
         }
         
-        # 检查每个列是否存在
+        # 清理实际列名（移除换行符）
+        cleaned_columns = {}
+        for actual_col in datasheet_data.columns:
+            cleaned_col = re.sub(r'\s*\n\s*', ' ', str(actual_col).strip())
+            cleaned_columns[cleaned_col] = actual_col
+        
+        # 检查每个列是否存在（使用清理后的列名）
         for col_type, expected_col in column_mapping.items():
-            if expected_col in datasheet_data.columns:
-                detected_columns[col_type] = expected_col
-                st.success(f"✅ 找到{col_type}列: '{expected_col}'")
+            # 清理预期列名
+            cleaned_expected = re.sub(r'\s*\n\s*', ' ', expected_col.strip())
+            
+            if cleaned_expected in cleaned_columns:
+                actual_col_name = cleaned_columns[cleaned_expected]
+                detected_columns[col_type] = actual_col_name
+                st.success(f"✅ 找到{col_type}列: '{actual_col_name}'")
             else:
-                st.error(f"❌ 未找到{col_type}列: '{expected_col}'")
-                # 尝试查找相似的列名
-                for actual_col in datasheet_data.columns:
-                    if expected_col.lower() in actual_col.lower():
+                st.error(f"❌ 未找到{col_type}列: '{cleaned_expected}'")
+                
+                # 尝试部分匹配
+                found = False
+                for cleaned_col, actual_col in cleaned_columns.items():
+                    if any(keyword in cleaned_col for keyword in expected_col.split()[:2]):
                         detected_columns[col_type] = actual_col
-                        st.warning(f"⚠️ 使用相似列名 {col_type}: '{actual_col}'")
+                        st.warning(f"⚠️ 使用部分匹配 {col_type}: '{actual_col}'")
+                        found = True
                         break
+                
+                if not found:
+                    # 显示可用的列名帮助用户识别
+                    st.info("可用的列名:")
+                    for cleaned_col, actual_col in cleaned_columns.items():
+                        st.write(f"  - '{actual_col}' → '{cleaned_col}'")
         
         return detected_columns
     
@@ -146,6 +178,7 @@ class DataProcessor:
         
         if missing_columns:
             st.error(f"❌ 缺少必要的列: {missing_columns}")
+            st.info("💡 请检查Datasheet文件格式，或手动指定列名")
             return None
         
         # 查找匹配的CHAVE
@@ -552,10 +585,10 @@ if hasattr(st.session_state, 'script_b'):
 
 st.sidebar.markdown("---")
 st.sidebar.info("""
-**最终版本特性:**
-✅ 自动识别所有列名
-✅ 正确的单位转换
-✅ 设备名NO→ZT转换
-✅ 精确的脚本生成
-✅ 完整的调试信息
+**修复版本特性:**
+✅ 修复列名换行符问题
+✅ 智能列名清理和匹配
+✅ 部分匹配功能
+✅ 详细的调试信息
+✅ 完整的列名显示
 """)
