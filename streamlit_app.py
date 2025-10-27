@@ -12,7 +12,7 @@ st.set_page_config(
 )
 
 st.title("📡 ZTE微波开站脚本生成器")
-st.subheader("简化版本 - 修复IP地址格式问题")
+st.subheader("简化版本 - 修复设备名称格式问题")
 
 class DataProcessor:
     @staticmethod
@@ -275,8 +275,10 @@ class DataProcessor:
             log_container.error("❌ 缺少必要的站点或设备信息")
             return None
         
-        # 设备名转换 NO → ZT
+        # 设备名转换 NO → ZT，并修复多余连字符
         device_name = device_name.replace('NO', 'ZT')
+        # 修复多余连字符问题：将连续的两个--替换为一个-
+        device_name = re.sub(r'-+', '-', device_name)
         log_container.info(f"🔄 设备名转换后: {device_name}")
         
         # 在DCN中查找站点信息
@@ -334,6 +336,16 @@ class DataProcessor:
         gateway_a = calculate_gateway(site_a_info.get('子网掩码') if site_a_info else None)
         gateway_b = calculate_gateway(site_b_info.get('子网掩码') if site_b_info else None)
         
+        # 修复站点B的设备名称生成逻辑
+        if site_a in device_name:
+            site_b_device_name = device_name.replace(site_a, site_b)
+        else:
+            # 使用标准的设备名称格式
+            site_b_device_name = f"MWE-4G-{site_b}-N1-ZT"
+        
+        # 再次修复设备名称中的多余连字符
+        site_b_device_name = re.sub(r'-+', '-', site_b_device_name)
+        
         config = {
             'chave_number': chave_number,
             'site_a': {
@@ -347,7 +359,7 @@ class DataProcessor:
             },
             'site_b': {
                 'site_name': site_b,
-                'device_name': device_name.replace(site_a, site_b) if site_a in device_name else f"MWE-MG-{site_b}-N1-ZT",
+                'device_name': site_b_device_name,
                 'ip': site_b_info.get('IP地址') if site_b_info else '10.211.51.203',
                 'vlan': site_b_info.get('VLAN') if site_b_info else 2929,
                 'gateway': gateway_b,
@@ -364,7 +376,7 @@ class DataProcessor:
         
         return config
 
-# ZTEScriptGenerator 类保持不变（与之前相同）
+# ZTEScriptGenerator 类保持不变
 class ZTEScriptGenerator:
     @staticmethod
     def generate_script(config, for_site_a=True):
@@ -694,9 +706,9 @@ if hasattr(st.session_state, 'config') and st.session_state.config:
 
 st.sidebar.markdown("---")
 st.sidebar.info("""
-**IP地址智能识别版本:**
-✅ 高优先级: 逗号分隔格式
-✅ 高优先级: AABBBCCCDDD格式  
-✅ 自动智能识别其他格式
-✅ 实时显示修复过程
+**修复设备名称版本:**
+✅ 修复设备名称多余连字符问题
+✅ 标准设备名称格式
+✅ 智能连字符清理
+✅ 完整的格式验证
 """)
