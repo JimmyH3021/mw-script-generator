@@ -1,184 +1,433 @@
-@staticmethod
-def find_site_config(dcn_data, datasheet_data, chave_number):
-    """根据CHAVE号码查找完整的站点配置"""
-    if dcn_data is None or datasheet_data is None:
-        return None
-    
-    st.info(f"🔍 正在查找CHAVE: {chave_number}")
-    
-    # 显示Datasheet的所有列名用于调试
-    st.info(f"📋 Datasheet所有列名: {list(datasheet_data.columns)}")
-    
-    # 1. 在Datasheet中查找CHAVE
-    chave_match = None
-    
-    # 增强列名匹配 - 处理大小写和空格问题
-    chave_columns = [
-        'Chave', 'CHAVE', 'chave', 'Chave ', 'CHAVE ', 'chave ',  # 带空格的变体
-        '站点编号', '编号', 'ID', 'Codigo', 'Código'
-    ]
-    
-    chave_col = None
-    for col in chave_columns:
-        # 精确匹配
-        if col in datasheet_data.columns:
-            chave_col = col
-            break
-        # 忽略大小写和空格的匹配
-        for actual_col in datasheet_data.columns:
-            if col.strip().lower() == actual_col.strip().lower():
-                chave_col = actual_col
-                break
-        if chave_col:
-            break
-    
-    if chave_col is None:
-        st.error("❌ 在Datasheet中未找到CHAVE列")
-        st.info(f"📋 可用的列: {', '.join(datasheet_data.columns.tolist())}")
-        return None
-    
-    st.success(f"✅ 找到CHAVE列: '{chave_col}'")
-    
-    # 清理CHAVE列数据
-    datasheet_data[chave_col] = datasheet_data[chave_col].astype(str).str.strip()
-    chave_match = datasheet_data[datasheet_data[chave_col] == str(chave_number).strip()]
-    
-    if len(chave_match) == 0:
-        st.error(f"❌ 在Datasheet中未找到CHAVE: {chave_number}")
-        # 显示前几个CHAVE值帮助调试
-        sample_values = datasheet_data[chave_col].unique()[:10]
-        st.info(f"📋 文件中存在的CHAVE值示例: {', '.join(map(str, sample_values))}")
-        return None
-    
-    # 其余代码保持不变...
-    datasheet_info = chave_match.iloc[0]
-    st.success(f"✅ 在Datasheet中找到CHAVE配置")
-    
-    # 2. 提取站点名称（L/M列）- 同样增强匹配
-    site_a_name = None
-    site_b_name = None
-    
-    # 增强列名匹配
-    site_columns = ['L', 'M', '站点A', '站点B', 'Site A', 'Site B']
-    for col in site_columns:
-        if col in datasheet_info:
-            if site_a_name is None:
-                site_a_name = str(datasheet_info[col]).strip()
-            else:
-                site_b_name = str(datasheet_info[col]).strip()
-                break
-    
-    if not site_a_name or not site_b_name:
-        st.error("❌ 无法找到站点名称信息")
-        st.info("💡 请检查L/M列是否存在")
-        return None
-    
-    st.info(f"📡 关联站点: {site_a_name} ↔ {site_b_name}")
-    
-    # 3. 在DCN中查找对应的站点信息
-    site_a_info = None
-    site_b_info = None
-    
-    for idx, site_info in dcn_data.iterrows():
-        site_name = str(site_info.get('站点名称', '')).strip()
-        if site_a_name in site_name:
-            site_a_info = site_info.to_dict()
-        if site_b_name in site_name:
-            site_b_info = site_info.to_dict()
-    
-    if not site_a_info and not site_b_info:
-        st.error("❌ 在DCN中未找到对应的站点信息")
-        # 显示DCN中的站点名称示例
-        if '站点名称' in dcn_data.columns:
-            sample_sites = dcn_data['站点名称'].astype(str).str.strip().unique()[:10]
-            st.info(f"📋 DCN中站点名称示例: {', '.join(sample_sites)}")
-        return None
-    
-    # 4. 提取设备配置（N/O列）- 增强匹配
-    device_a = None
-    device_b = None
-    
-    device_columns = ['N', 'O', '设备A', '设备B', 'Device A', 'Device B']
-    for col in device_columns:
-        if col in datasheet_info:
-            if device_a is None:
-                device_a = str(datasheet_info[col]).strip()
-            else:
-                device_b = str(datasheet_info[col]).strip()
-                break
-    
-    # 如果没找到，使用默认值
-    if not device_a:
-        device_a = f"设备A_{chave_number}"
-    if not device_b:
-        device_b = f"设备B_{chave_number}"
-    
-    # 设备名称处理：将NO改为ZT
-    device_a = device_a.replace('NO', 'ZT')
-    device_b = device_b.replace('NO', 'ZT')
-    
-    # 5. 提取无线参数 - 增强匹配
-    bandwidth_columns = ['AN', '带宽', 'Bandwidth']
-    tx_power_columns = ['AS', '发射功率', 'TX Power']
-    tx_freq_columns = ['DR', '发射频率', 'TX Frequency']
-    rx_freq_columns = ['DS', '接收频率', 'RX Frequency']
-    
-    bandwidth = 112000
-    tx_power = 220
-    tx_freq = 14977000
-    rx_freq = 14577000
-    
-    # 查找带宽
-    for col in bandwidth_columns:
-        if col in datasheet_info:
-            bandwidth = datasheet_info[col]
-            break
-    
-    # 查找发射功率
-    for col in tx_power_columns:
-        if col in datasheet_info:
-            tx_power = datasheet_info[col]
-            break
-    
-    # 查找发射频率
-    for col in tx_freq_columns:
-        if col in datasheet_info:
-            tx_freq = datasheet_info[col]
-            break
-    
-    # 查找接收频率
-    for col in rx_freq_columns:
-        if col in datasheet_info:
-            rx_freq = datasheet_info[col]
-            break
-    
-    st.info(f"📡 无线参数: 带宽={bandwidth}, 功率={tx_power}, 发射={tx_freq}, 接收={rx_freq}")
-    
-    # 返回完整配置
-    config = {
-        'chave_number': chave_number,
-        'site_a': {
-            'name': site_a_name,
-            'device': device_a,
-            'ip': site_a_info.get('IP地址') if site_a_info else None,
-            'vlan': site_a_info.get('VLAN') if site_a_info else 2929,
-            'subnet': site_a_info.get('子网掩码') if site_a_info else '10.211.51.200/29',
-        },
-        'site_b': {
-            'name': site_b_name,
-            'device': device_b,
-            'ip': site_b_info.get('IP地址') if site_b_info else None,
-            'vlan': site_b_info.get('VLAN') if site_b_info else 2929,
-            'subnet': site_b_info.get('子网掩码') if site_b_info else '10.211.51.200/29',
-        },
-        'radio_params': {
-            'bandwidth': bandwidth,
-            'tx_power': tx_power,
-            'tx_frequency': tx_freq,
-            'rx_frequency': rx_freq,
-            'modulation': 'qpsk',
-            'operation_mode': 'G02'
-        }
+# -*- coding: utf-8 -*-
+import streamlit as st
+import pandas as pd
+import numpy as np
+from datetime import datetime
+import base64
+import io
+import json
+import re
+
+# 页面配置
+st.set_page_config(
+    page_title="微波开站脚本生成器",
+    page_icon="📡",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# CSS样式
+st.markdown("""
+<style>
+    .main-header {
+        font-size: 2.5rem;
+        color: #1f77b4;
+        text-align: center;
+        margin-bottom: 2rem;
     }
+    .section-header {
+        font-size: 1.5rem;
+        color: #ff7f0e;
+        margin-top: 2rem;
+        margin-bottom: 1rem;
+    }
+    .success-box {
+        background-color: #d4edda;
+        border: 1px solid #c3e6cb;
+        border-radius: 5px;
+        padding: 15px;
+        margin: 10px 0;
+    }
+    .warning-box {
+        background-color: #fff3cd;
+        border: 1px solid #ffeaa7;
+        border-radius: 5px;
+        padding: 15px;
+        margin: 10px 0;
+    }
+    .upload-section {
+        background-color: #e8f4fd;
+        border: 2px dashed #1f77b4;
+        border-radius: 10px;
+        padding: 20px;
+        text-align: center;
+        margin: 10px 0;
+    }
+    .chave-input {
+        font-size: 1.5rem;
+        text-align: center;
+        padding: 15px;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+class DataProcessor:
+    """数据处理类 - 负责CHAVE匹配和数据整合"""
     
-    return config
+    @staticmethod
+    def parse_dcn_file(file):
+        """解析DCN文件"""
+        try:
+            if file.name.endswith('.csv'):
+                df = pd.read_csv(file)
+            else:
+                df = pd.read_excel(file)
+            
+            st.success(f"✅ DCN文件加载成功，共 {len(df)} 条记录")
+            return df
+        except Exception as e:
+            st.error(f"❌ DCN文件解析失败: {e}")
+            return None
+    
+    @staticmethod
+    def parse_datasheet_file(file):
+        """解析Datasheet文件"""
+        try:
+            if file.name.endswith('.csv'):
+                df = pd.read_csv(file)
+            else:
+                df = pd.read_excel(file)
+            
+            st.success(f"✅ Datasheet加载成功，共 {len(df)} 条记录")
+            return df
+        except Exception as e:
+            st.error(f"❌ Datasheet解析失败: {e}")
+            return None
+    
+    @staticmethod
+    def find_site_by_chave(dcn_data, chave_number):
+        """根据CHAVE号码查找站点信息"""
+        if dcn_data is None:
+            return None
+            
+        # 尝试不同的列名匹配
+        chave_columns = ['CHAVE', 'Chave', 'chave', '站点编号', '编号', 'ID']
+        
+        for col in chave_columns:
+            if col in dcn_data.columns:
+                matched_sites = dcn_data[dn_data[col] == chave_number]
+                if len(matched_sites) > 0:
+                    return matched_sites.iloc[0].to_dict()
+        
+        return None
+    
+    @staticmethod
+    def find_device_config(datasheet_data, site_info):
+        """根据站点信息查找设备配置"""
+        if datasheet_data is None:
+            return None
+            
+        # 尝试匹配设备型号或厂商
+        if '设备型号' in site_info and '设备型号' in datasheet_data.columns:
+            matched_devices = datasheet_data[datasheet_data['设备型号'] == site_info['设备型号']]
+            if len(matched_devices) > 0:
+                return matched_devices.iloc[0].to_dict()
+        
+        return None
+
+class MicrowaveScriptGenerator:
+    """微波开站脚本生成器"""
+    
+    def __init__(self):
+        self.vendors = {
+            "华为": "Huawei",
+            "中兴": "ZTE", 
+            "爱立信": "Ericsson",
+            "诺基亚": "Nokia"
+        }
+    
+    def generate_huawei_script(self, config):
+        """生成华为设备脚本"""
+        script = f"""
+# 华为微波设备开站脚本
+# 生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+# 站点名称: {config['site_name']}
+# CHAVE号码: {config['chave_number']}
+
+# 系统配置
+system-view
+sysname {config['site_name']}
+
+# 接口配置
+interface gigabitethernet 0/0/1
+ description Connection_to_Router
+ port link-type trunk
+ port trunk allow-pass vlan {config['vlan_id']}
+ undo shutdown
+
+# 无线接口配置
+interface radio 0/0/1
+ description Radio_Link_to_{config['remote_site']}
+ frequency {config['frequency']} MHz
+ bandwidth {config['bandwidth']}
+ modulation {config['modulation']}
+ tx-power {config['tx_power']}
+ adaptive-modulation enable
+ undo shutdown
+
+# VLAN配置
+vlan {config['vlan_id']}
+ description Management_VLAN
+
+# 业务配置
+interface vlanif {config['vlan_id']}
+ ip address {config['ip_address']} {config['subnet_mask']}
+
+# 路由配置
+ip route-static 0.0.0.0 0.0.0.0 {config['gateway']}
+
+# 管理配置
+snmp-agent
+snmp-agent community read {config['snmp_read']}
+snmp-agent community write {config['snmp_write']}
+
+# 保存配置
+save
+y
+
+# 开站完成
+display radio 0/0/1
+display interface gigabitethernet 0/0/1
+        """
+        return script
+    
+    def generate_zte_script(self, config):
+        """生成中兴设备脚本"""
+        script = f"""
+# 中兴微波设备开站脚本
+# 生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+# 站点名称: {config['site_name']}
+# CHAVE号码: {config['chave_number']}
+
+# 进入配置模式
+configure terminal
+
+# 系统配置
+hostname {config['site_name']}
+
+# 以太网接口配置
+interface gei-0/1
+ description "Uplink_Interface"
+ switchport mode trunk
+ switchport trunk allowed vlan {config['vlan_id']}
+ no shutdown
+
+# 无线接口配置
+interface radio-0/1
+ description "Wireless_Link_to_{config['remote_site']}"
+ frequency {config['frequency']}
+ bandwidth {config['bandwidth']}
+ modulation {config['modulation']}
+ output-power {config['tx_power']}
+ adaptive-modulation on
+ no shutdown
+
+# VLAN配置
+vlan {config['vlan_id']}
+ name "Management_VLAN"
+
+# IP接口配置
+interface vlan {config['vlan_id']}
+ ip address {config['ip_address']} {config['subnet_mask']}
+
+# 默认路由
+ip route 0.0.0.0/0 {config['gateway']}
+
+# SNMP配置
+snmp-server community {config['snmp_read']} ro
+snmp-server community {config['snmp_write']} rw
+
+# 保存配置
+write memory
+
+# 验证配置
+show interface radio-0/1
+show interface gei-0/1
+        """
+        return script
+    
+    def generate_script(self, config):
+        """根据配置生成脚本"""
+        vendor = config.get('vendor', '华为')
+        
+        if vendor == "华为":
+            return self.generate_huawei_script(config)
+        elif vendor == "中兴":
+            return self.generate_zte_script(config)
+        else:
+            return self.generate_generic_script(config)
+    
+    def generate_generic_script(self, config):
+        """生成通用脚本模板"""
+        script = f"""
+# 微波设备开站脚本
+# 生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+# 站点名称: {config['site_name']}
+# CHAVE号码: {config['chave_number']}
+
+# 基本配置步骤:
+# 1. 系统命名: {config['site_name']}
+# 2. 配置管理IP: {config['ip_address']}/{config['subnet_mask']}
+# 3. 配置网关: {config['gateway']}
+# 4. 配置无线参数:
+#    - 频率: {config['frequency']} MHz
+#    - 带宽: {config['bandwidth']}
+#    - 调制方式: {config['modulation']}
+#    - 发射功率: {config['tx_power']} dBm
+# 5. 配置VLAN: {config['vlan_id']}
+# 6. 配置SNMP:
+#    - 只读团体字: {config['snmp_read']}
+#    - 读写团体字: {config['snmp_write']}
+# 7. 保存配置
+        """
+        return script
+
+def create_download_link(content, filename, text):
+    """创建下载链接"""
+    b64 = base64.b64encode(content.encode()).decode()
+    href = f'<a href="data:file/txt;base64,{b64}" download="{filename}">{text}</a>'
+    return href
+
+def main():
+    """主应用"""
+    st.markdown('<h1 class="main-header">📡 微波开站脚本生成器</h1>', unsafe_allow_html=True)
+    st.markdown('<h3 style="text-align: center; color: #666;">输入CHAVE号码，一键生成开站脚本</h3>', unsafe_allow_html=True)
+    
+    # 初始化处理器和生成器
+    processor = DataProcessor()
+    generator = MicrowaveScriptGenerator()
+    
+    # 会话状态初始化
+    if 'dcn_data' not in st.session_state:
+        st.session_state.dcn_data = None
+    if 'datasheet_data' not in st.session_state:
+        st.session_state.datasheet_data = None
+    
+    # 侧边栏 - 文件上传
+    with st.sidebar:
+        st.header("📁 文件上传")
+        
+        # DCN文件上传
+        dcn_file = st.file_uploader("上传DCN文件", type=['xlsx', 'xls', 'csv'], key="dcn_uploader")
+        if dcn_file is not None:
+            st.session_state.dcn_data = processor.parse_dcn_file(dcn_file)
+            if st.session_state.dcn_data is not None:
+                st.dataframe(st.session_state.dcn_data.head(3))
+        
+        # Datasheet文件上传
+        datasheet_file = st.file_uploader("上传Datasheet", type=['xlsx', 'xls', 'csv'], key="datasheet_uploader")
+        if datasheet_file is not None:
+            st.session_state.datasheet_data = processor.parse_datasheet_file(datasheet_file)
+            if st.session_state.datasheet_data is not None:
+                st.dataframe(st.session_state.datasheet_data.head(3))
+        
+        st.markdown("---")
+        st.header("📊 数据状态")
+        if st.session_state.dcn_data is not None:
+            st.success(f"✅ DCN: {len(st.session_state.dcn_data)} 站点")
+        else:
+            st.warning("❌ 未加载DCN文件")
+            
+        if st.session_state.datasheet_data is not None:
+            st.success(f"✅ Datasheet: {len(st.session_state.datasheet_data)} 设备")
+        else:
+            st.warning("❌ 未加载Datasheet")
+    
+    # 主内容区 - CHAVE输入和脚本生成
+    col1, col2 = st.columns([1, 2])
+    
+    with col1:
+        st.markdown('<div class="section-header">🔑 输入CHAVE号码</div>', unsafe_allow_html=True)
+        
+        chave_number = st.text_input(
+            "CHAVE号码",
+            placeholder="请输入CHAVE号码...",
+            key="chave_input"
+        )
+        
+        if chave_number:
+            # 查找匹配的站点信息
+            site_info = None
+            device_config = None
+            
+            if st.session_state.dcn_data is not None:
+                site_info = processor.find_site_by_chave(st.session_state.dcn_data, chave_number)
+            
+            if site_info and st.session_state.datasheet_data is not None:
+                device_config = processor.find_device_config(st.session_state.datasheet_data, site_info)
+            
+            # 显示匹配结果
+            if site_info:
+                st.success("✅ 找到匹配的站点信息")
+                
+                # 创建配置字典
+                config = {
+                    'chave_number': chave_number,
+                    'site_name': site_info.get('站点名称', f'SITE_{chave_number}'),
+                    'ip_address': site_info.get('IP地址', '192.168.100.10'),
+                    'vlan_id': site_info.get('VLAN', 100),
+                    'subnet_mask': '255.255.255.0',
+                    'gateway': '192.168.100.1',
+                    'frequency': device_config.get('频率', 15000) if device_config else 15000,
+                    'bandwidth': device_config.get('带宽', '28MHz') if device_config else '28MHz',
+                    'modulation': device_config.get('调制方式', '16QAM') if device_config else '16QAM',
+                    'tx_power': device_config.get('发射功率', 15) if device_config else 15,
+                    'vendor': device_config.get('厂商', '华为') if device_config else '华为',
+                    'snmp_read': 'public',
+                    'snmp_write': 'private',
+                    'remote_site': site_info.get('对端站点', f'SITE_{chave_number}_PEER')
+                }
+                
+                # 显示配置信息
+                with st.expander("📋 站点配置信息", expanded=True):
+                    st.json(config)
+                
+                # 生成脚本按钮
+                if st.button("🚀 生成开站脚本", type="primary", use_container_width=True):
+                    script = generator.generate_script(config)
+                    
+                    st.markdown('<div class="section-header">📜 生成的脚本</div>', unsafe_allow_html=True)
+                    st.code(script, language='bash')
+                    
+                    filename = f"{config['vendor']}_{config['site_name']}_CHAVE{chave_number}.txt"
+                    st.markdown(create_download_link(script, filename, "📥 下载脚本"), unsafe_allow_html=True)
+                    
+                    st.success("🎉 脚本生成完成！")
+            
+            elif st.session_state.dcn_data is None:
+                st.error("❌ 请先上传DCN文件")
+            else:
+                st.error(f"❌ 未找到CHAVE号码 '{chave_number}' 对应的站点信息")
+    
+    with col2:
+        st.markdown('<div class="section-header">📖 使用说明</div>', unsafe_allow_html=True)
+        
+        st.markdown("""
+        <div class="config-box">
+        <h4>🚀 快速开始：</h4>
+        <ol>
+            <li><strong>上传DCN文件</strong> - 包含站点基础信息（站点名称、IP、VLAN等）</li>
+            <li><strong>上传Datasheet</strong> - 包含设备技术参数（频率、带宽、调制方式等）</li>
+            <li><strong>输入CHAVE号码</strong> - 自动匹配站点和设备信息</li>
+            <li><strong>一键生成脚本</strong> - 自动生成对应厂商的开站脚本</li>
+        </ol>
+        
+        <h4>📋 文件格式要求：</h4>
+        <ul>
+            <li><strong>DCN文件</strong>：必须包含 CHAVE、站点名称、IP地址、VLAN 等列</li>
+            <li><strong>Datasheet</strong>：包含设备型号、频率、带宽、调制方式等参数</li>
+            <li>支持 Excel (.xlsx, .xls) 和 CSV 格式</li>
+        </ul>
+        
+        <h4>🎯 优势：</h4>
+        <ul>
+            <li>✅ 只需输入CHAVE号码，无需手动配置</li>
+            <li>✅ 自动匹配站点和设备信息</li>
+            <li>✅ 减少人工错误，提高效率</li>
+            <li>✅ 支持批量处理多个站点</li>
+        </ul>
+        </div>
+        """, unsafe_allow_html=True)
+
+if __name__ == "__main__":
+    main()
