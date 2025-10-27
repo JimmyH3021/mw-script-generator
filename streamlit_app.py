@@ -12,7 +12,7 @@ st.set_page_config(
 )
 
 st.title("📡 ZTE微波开站脚本生成器")
-st.subheader("简化版本 - 日志信息折叠")
+st.subheader("简化版本 - 修复IP地址格式问题")
 
 class DataProcessor:
     @staticmethod
@@ -75,6 +75,82 @@ class DataProcessor:
                 df = df.rename(columns={old_col: new_col})
         
         df = df.dropna(how='all')
+        
+        # 修复IP地址格式问题
+        df = DataProcessor.fix_ip_addresses(df)
+        
+        return df
+
+    @staticmethod
+    def fix_ip_addresses(df):
+        """修复IP地址格式问题"""
+        if 'IP地址' not in df.columns:
+            return df
+        
+        def convert_ip_format(ip_value):
+            if pd.isna(ip_value):
+                return ip_value
+            
+            ip_str = str(ip_value).strip()
+            
+            # 如果已经是正常IP格式，直接返回
+            if re.match(r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$', ip_str):
+                return ip_str
+            
+            # 处理逗号分隔的IP (如 "10,226,106,192")
+            if ',' in ip_str:
+                ip_parts = ip_str.split(',')
+                if len(ip_parts) == 4:
+                    return '.'.join(ip_parts)
+            
+            # 处理数字格式的IP (如 "10226106192")
+            if ip_str.replace('.', '').isdigit() and len(ip_str) >= 7:
+                # 尝试从数字格式解析IP
+                ip_num = ip_str.replace('.', '')
+                
+                # 如果是11位数字，可能是没有点的IP地址
+                if len(ip_num) == 11:
+                    # 格式: AABBCCDDD -> AA.BB.CC.DDD
+                    part1 = ip_num[:2]  # 10
+                    part2 = ip_num[2:4]  # 226
+                    part3 = ip_num[4:6]  # 106
+                    part4 = ip_num[6:]   # 192
+                    return f"{part1}.{part2}.{part3}.{part4}"
+                
+                # 如果是10位数字
+                elif len(ip_num) == 10:
+                    # 格式: AABBCCDD -> AA.BB.CC.DD
+                    part1 = ip_num[:2]  # 10
+                    part2 = ip_num[2:4]  # 226
+                    part3 = ip_num[4:6]  # 106
+                    part4 = ip_num[6:]   # 192
+                    return f"{part1}.{part2}.{part3}.{part4}"
+                
+                # 如果是8-9位数字，尝试不同的分割方式
+                elif 8 <= len(ip_num) <= 9:
+                    # 尝试 3-2-2-2 或 3-2-2-1 等分割方式
+                    for i in range(1, 4):
+                        for j in range(1, 4):
+                            for k in range(1, 4):
+                                if i + j + k < len(ip_num):
+                                    part1 = ip_num[:i]
+                                    part2 = ip_num[i:i+j]
+                                    part3 = ip_num[i+j:i+j+k]
+                                    part4 = ip_num[i+j+k:]
+                                    
+                                    # 验证每个部分是否在有效范围内
+                                    if (0 <= int(part1) <= 255 and 
+                                        0 <= int(part2) <= 255 and 
+                                        0 <= int(part3) <= 255 and 
+                                        0 <= int(part4) <= 255):
+                                        return f"{part1}.{part2}.{part3}.{part4}"
+            
+            # 如果无法解析，返回原始值
+            return ip_str
+        
+        # 应用IP地址格式修复
+        df['IP地址'] = df['IP地址'].apply(convert_ip_format)
+        
         return df
 
     @staticmethod
@@ -211,9 +287,11 @@ class DataProcessor:
             if site_a in site_name:
                 site_a_info = site_row.to_dict()
                 log_container.success(f"✅ 在DCN中找到站点A: {site_name}")
+                log_container.info(f"   IP地址: {site_a_info.get('IP地址', '未找到')}")
             if site_b in site_name:
                 site_b_info = site_row.to_dict()
                 log_container.success(f"✅ 在DCN中找到站点B: {site_name}")
+                log_container.info(f"   IP地址: {site_b_info.get('IP地址', '未找到')}")
         
         if not site_a_info or not site_b_info:
             log_container.warning("⚠️ 在DCN中未找到完整的站点信息，使用默认值")
@@ -285,6 +363,7 @@ class DataProcessor:
         
         return config
 
+# ZTEScriptGenerator 类保持不变（与之前相同）
 class ZTEScriptGenerator:
     @staticmethod
     def generate_script(config, for_site_a=True):
@@ -528,8 +607,6 @@ if 'datasheet_data' not in st.session_state:
     st.session_state.datasheet_data = None
 if 'config' not in st.session_state:
     st.session_state.config = None
-if 'processing_log' not in st.session_state:
-    st.session_state.processing_log = []
 
 # 文件上传
 st.sidebar.header("文件上传")
@@ -544,6 +621,9 @@ if dcn_file:
     st.session_state.dcn_data = processor.parse_dcn_file(dcn_file)
     if st.session_state.dcn_data is not None:
         st.success(f"✅ DCN文件加载成功，共 {len(st.session_state.dcn_data)} 条记录")
+        # 显示DCN数据预览（IP地址修复后）
+        with st.expander("📊 DCN数据预览", expanded=False):
+            st.dataframe(st.session_state.dcn_data.head())
 
 if datasheet_file:
     st.session_state.datasheet_data = processor.parse_datasheet_file(datasheet_file)
@@ -588,6 +668,7 @@ if hasattr(st.session_state, 'config') and st.session_state.config:
     
     with col1:
         st.subheader(f"📍 {site_a_name}")
+        st.info(f"IP: {st.session_state.config['site_a']['ip']}")
         st.info(f"TX: {st.session_state.config['site_a']['tx_frequency']} KHz")
         st.info(f"RX: {st.session_state.config['site_a']['rx_frequency']} KHz")
         st.info(f"功率: {st.session_state.config['radio_params']['tx_power']} dBm")
@@ -597,6 +678,7 @@ if hasattr(st.session_state, 'config') and st.session_state.config:
     
     with col2:
         st.subheader(f"📍 {site_b_name}")
+        st.info(f"IP: {st.session_state.config['site_b']['ip']}")
         st.info(f"TX: {st.session_state.config['site_b']['tx_frequency']} KHz")
         st.info(f"RX: {st.session_state.config['site_b']['rx_frequency']} KHz")
         st.info(f"功率: {st.session_state.config['radio_params']['tx_power']} dBm")
@@ -611,9 +693,9 @@ if hasattr(st.session_state, 'config') and st.session_state.config:
 
 st.sidebar.markdown("---")
 st.sidebar.info("""
-**日志折叠版本:**
-✅ 所有处理信息折叠到日志中
-✅ 界面更加简洁
-✅ 完整的调试信息
-✅ 一键查看处理过程
+**IP地址修复版本:**
+✅ 自动修复IP地址格式问题
+✅ 支持逗号分隔的IP
+✅ 支持数字格式IP转换
+✅ 完整的格式识别
 """)
