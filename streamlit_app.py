@@ -12,7 +12,7 @@ st.set_page_config(
 )
 
 st.title("📡 ZTE微波开站脚本生成器")
-st.subheader("最终版本 - 修复列名换行符问题")
+st.subheader("简化版本 - 并排脚本显示")
 
 class DataProcessor:
     @staticmethod
@@ -97,11 +97,6 @@ class DataProcessor:
                 return None
             
             st.success(f"✅ Datasheet加载成功，共 {len(df)} 条记录")
-            
-            # 显示列名用于调试
-            st.info("📋 Datasheet列名:")
-            for i, col in enumerate(df.columns):
-                st.write(f"  {i}: '{col}'")
                 
             return df
             
@@ -132,6 +127,14 @@ class DataProcessor:
             cleaned_col = re.sub(r'\s*\n\s*', ' ', str(actual_col).strip())
             cleaned_columns[cleaned_col] = actual_col
         
+        # 在折叠页中显示列名信息
+        with st.expander("📋 Datasheet列名详情", expanded=False):
+            st.info("实际列名与清理后列名对比:")
+            for i, (cleaned_col, actual_col) in enumerate(cleaned_columns.items()):
+                st.write(f"{i:2d}. 原始: '{actual_col}'")
+                st.write(f"    清理: '{cleaned_col}'")
+                st.write("---")
+        
         # 检查每个列是否存在（使用清理后的列名）
         for col_type, expected_col in column_mapping.items():
             # 清理预期列名
@@ -154,10 +157,7 @@ class DataProcessor:
                         break
                 
                 if not found:
-                    # 显示可用的列名帮助用户识别
-                    st.info("可用的列名:")
-                    for cleaned_col, actual_col in cleaned_columns.items():
-                        st.write(f"  - '{actual_col}' → '{cleaned_col}'")
+                    st.error(f"❌ 无法匹配 {col_type} 列，请检查文件格式")
         
         return detected_columns
     
@@ -519,6 +519,8 @@ if 'dcn_data' not in st.session_state:
     st.session_state.dcn_data = None
 if 'datasheet_data' not in st.session_state:
     st.session_state.datasheet_data = None
+if 'config' not in st.session_state:
+    st.session_state.config = None
 
 # 文件上传
 st.sidebar.header("文件上传")
@@ -547,48 +549,47 @@ if chave_number and st.session_state.dcn_data is not None and st.session_state.d
     )
     
     if config:
+        st.session_state.config = config
         st.success("🎯 配置匹配成功！")
-        
-        # 显示配置详情
-        with st.expander("配置详情"):
-            st.json(config)
-        
-        # 生成脚本
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            if st.button(f"生成 {config['site_a']['device_name']} 脚本", use_container_width=True):
-                script = generator.generate_script(config, for_site_a=True)
-                st.session_state.script_a = script
-                st.session_state.site_a = config['site_a']['device_name']
-        
-        with col2:
-            if st.button(f"生成 {config['site_b']['device_name']} 脚本", use_container_width=True):
-                script = generator.generate_script(config, for_site_a=False)
-                st.session_state.script_b = script
-                st.session_state.site_b = config['site_b']['device_name']
 
-# 显示生成的脚本
-if hasattr(st.session_state, 'script_a'):
+# 并排显示脚本
+if hasattr(st.session_state, 'config') and st.session_state.config:
     st.markdown("---")
-    st.subheader(f"脚本 - {st.session_state.site_a}")
-    st.code(st.session_state.script_a, language='bash')
-    filename = f"{st.session_state.site_a}.txt"
-    st.markdown(create_download_link(st.session_state.script_a, filename, "📥 下载脚本"), unsafe_allow_html=True)
+    st.subheader("📜 生成的配置脚本")
+    
+    # 生成两个站点的脚本
+    script_a = generator.generate_script(st.session_state.config, for_site_a=True)
+    script_b = generator.generate_script(st.session_state.config, for_site_a=False)
+    
+    site_a_name = st.session_state.config['site_a']['device_name']
+    site_b_name = st.session_state.config['site_b']['device_name']
+    
+    # 并排显示脚本
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.subheader(f"📍 {site_a_name}")
+        with st.expander(f"查看 {site_a_name} 脚本", expanded=True):
+            st.code(script_a, language='bash')
+        st.markdown(create_download_link(script_a, f"{site_a_name}.txt", "📥 下载脚本"), unsafe_allow_html=True)
+    
+    with col2:
+        st.subheader(f"📍 {site_b_name}")
+        with st.expander(f"查看 {site_b_name} 脚本", expanded=True):
+            st.code(script_b, language='bash')
+        st.markdown(create_download_link(script_b, f"{site_b_name}.txt", "📥 下载脚本"), unsafe_allow_html=True)
 
-if hasattr(st.session_state, 'script_b'):
-    st.markdown("---")
-    st.subheader(f"脚本 - {st.session_state.site_b}")
-    st.code(st.session_state.script_b, language='bash')
-    filename = f"{st.session_state.site_b}.txt"
-    st.markdown(create_download_link(st.session_state.script_b, filename, "📥 下载脚本"), unsafe_allow_html=True)
+# 配置详情折叠页
+if hasattr(st.session_state, 'config') and st.session_state.config:
+    with st.expander("🔧 配置详情", expanded=False):
+        st.json(st.session_state.config)
 
 st.sidebar.markdown("---")
 st.sidebar.info("""
-**修复版本特性:**
-✅ 修复列名换行符问题
-✅ 智能列名清理和匹配
-✅ 部分匹配功能
-✅ 详细的调试信息
-✅ 完整的列名显示
+**简化版本特性:**
+✅ 并排脚本显示
+✅ 折叠页组织内容
+✅ 一键下载脚本
+✅ 清晰的布局
+✅ 完整的配置信息
 """)
