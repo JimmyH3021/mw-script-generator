@@ -11,7 +11,7 @@ st.set_page_config(
 )
 
 st.title("📡 ZTE微波开站脚本生成器")
-st.subheader("巴西项目专用 - 修复列名识别")
+st.subheader("巴西项目专用 - 精确脚本生成")
 
 class DataProcessor:
     @staticmethod
@@ -21,11 +21,8 @@ class DataProcessor:
             if file.name.endswith('.csv'):
                 df = pd.read_csv(file)
             elif file.name.endswith(('.xlsx', '.xls')):
-                # 读取Excel文件
                 excel_file = pd.ExcelFile(file)
                 sheet_names = excel_file.sheet_names
-                
-                st.info(f"📑 检测到 {len(sheet_names)} 个sheet")
                 
                 # 自动查找 PROJETO LÓGICO sheet
                 target_sheet = None
@@ -36,9 +33,6 @@ class DataProcessor:
                 
                 if target_sheet is None:
                     target_sheet = sheet_names[0]
-                    st.warning(f"使用第一个sheet: {target_sheet}")
-                else:
-                    st.success(f"使用sheet: {target_sheet}")
                 
                 df = pd.read_excel(file, sheet_name=target_sheet)
             else:
@@ -57,14 +51,12 @@ class DataProcessor:
     @staticmethod
     def clean_dcn_data(df):
         """清理DCN数据"""
-        # 移除全空行
         df = df.dropna(how='all')
         
         # 查找数据开始的行
         for idx, row in df.iterrows():
             row_str = ' '.join([str(x) for x in row.values if pd.notna(x)])
             if any(keyword in row_str for keyword in ['End. IP', '10.211.', 'IP地址']):
-                # 重新设置列名
                 new_columns = df.iloc[idx]
                 df = df.iloc[idx + 1:]
                 df.columns = [str(col).strip() for col in new_columns.values]
@@ -90,24 +82,14 @@ class DataProcessor:
         """解析Datasheet文件 - 从第二行开始读取数据"""
         try:
             if file.name.endswith('.csv'):
-                # CSV文件：跳过第一行（表头），使用第二行作为列名
                 df = pd.read_csv(file, header=1)
-                st.info("📋 使用第二行作为列名（CSV格式）")
             elif file.name.endswith(('.xlsx', '.xls')):
-                # Excel文件：跳过第一行，使用第二行作为列名
                 df = pd.read_excel(file, header=1)
-                st.info("📋 使用第二行作为列名（Excel格式）")
             else:
                 st.error("❌ 不支持的文件格式")
                 return None
             
             st.success(f"✅ Datasheet加载成功，共 {len(df)} 条记录")
-            
-            # 显示处理后的列名和数据
-            st.info(f"📋 处理后的列名: {list(df.columns)}")
-            st.info(f"📊 前3行数据:")
-            st.dataframe(df.head(3))
-            
             return df
             
         except Exception as e:
@@ -117,22 +99,10 @@ class DataProcessor:
     @staticmethod
     def find_chave_column(datasheet_data):
         """查找CHAVE列"""
-        chave_columns = ['Chave', 'CHAVE', 'chave', '站点编号']
-        
-        # 显示所有列名用于调试
-        st.info(f"🔍 正在查找CHAVE列，可用列: {list(datasheet_data.columns)}")
-        
+        chave_columns = ['Chave', 'CHAVE', 'chave']
         for col in chave_columns:
             if col in datasheet_data.columns:
-                st.success(f"✅ 找到CHAVE列: '{col}'")
                 return col
-        
-        # 如果没有找到标准列名，尝试查找包含'chave'的列
-        for col in datasheet_data.columns:
-            if 'chave' in str(col).lower():
-                st.success(f"✅ 找到CHAVE列（模糊匹配）: '{col}'")
-                return col
-        
         return None
     
     @staticmethod
@@ -147,70 +117,44 @@ class DataProcessor:
             st.error("❌ 未找到CHAVE列")
             return None
         
-        # 清理CHAVE列数据
-        datasheet_data[chave_col] = datasheet_data[chave_col].astype(str).str.strip()
-        
-        # 显示CHAVE列的所有值用于调试
-        unique_chaves = datasheet_data[chave_col].unique()
-        st.info(f"📋 CHAVE列中的所有值: {list(unique_chaves)}")
-        
         # 查找匹配的CHAVE
+        datasheet_data[chave_col] = datasheet_data[chave_col].astype(str).str.strip()
         matches = datasheet_data[datasheet_data[chave_col] == chave_number.strip()]
         
         if len(matches) == 0:
             st.error(f"❌ 未找到CHAVE: {chave_number}")
-            st.info(f"💡 请检查CHAVE号码是否正确。可用的CHAVE值: {list(unique_chaves)}")
             return None
         
         match_data = matches.iloc[0]
-        st.success(f"✅ 找到CHAVE配置")
         
-        # 显示匹配的完整数据用于调试
-        st.info("📊 匹配的完整数据:")
-        st.dataframe(matches)
-        
-        # 提取站点名称 - 使用正确的列名
+        # 提取站点名称和设备名称
         site_a = None
         site_b = None
+        device_a = None
+        device_b = None
         
-        # 站点名称列名（根据你提供的信息）
-        site_columns = [
-            'Site ID Estação 1', 'Site ID Estação 2',
-            'Site ID Estacao 1', 'Site ID Estacao 2',
-            'Site ID Estação1', 'Site ID Estação2',
-            'Site ID Estacao1', 'Site ID Estacao2'
-        ]
+        # 站点名称列名
+        site_columns = ['Site ID Estação 1', 'Site ID Estação 2']
+        # 设备名称列名  
+        device_columns = ['NE ID Estação 1', 'NE ID Estação 2']
         
         for col in site_columns:
             if col in match_data:
                 if site_a is None:
                     site_a = str(match_data[col]).strip()
-                    st.success(f"✅ 找到站点A ({col}): {site_a}")
-                elif site_b is None:
+                else:
                     site_b = str(match_data[col]).strip()
-                    st.success(f"✅ 找到站点B ({col}): {site_b}")
-                    break
         
-        # 如果没找到，尝试其他可能的列名
-        if not site_a or not site_b:
-            for col in match_data.index:
-                if 'site' in str(col).lower() or 'estação' in str(col).lower() or 'estacao' in str(col).lower():
-                    value = str(match_data[col]).strip()
-                    if value and value != 'nan':
-                        if site_a is None:
-                            site_a = value
-                            st.info(f"🔍 找到站点A ({col}): {site_a}")
-                        else:
-                            site_b = value
-                            st.info(f"🔍 找到站点B ({col}): {site_b}")
-                            break
+        for col in device_columns:
+            if col in match_data:
+                if device_a is None:
+                    device_a = str(match_data[col]).strip().replace('NO', 'ZT')
+                else:
+                    device_b = str(match_data[col]).strip().replace('NO', 'ZT')
         
-        if not site_a or not site_b:
-            st.error("❌ 未找到站点名称")
-            st.info(f"💡 请检查Datasheet中站点名称的列名。所有可用列: {list(match_data.index)}")
+        if not site_a or not site_b or not device_a or not device_b:
+            st.error("❌ 未找到完整的站点和设备信息")
             return None
-        
-        st.success(f"📡 关联站点: {site_a} ↔ {site_b}")
         
         # 在DCN中查找站点信息
         site_a_info = None
@@ -220,117 +164,49 @@ class DataProcessor:
             site_name = str(site_row.get('站点名称', '')).strip()
             if site_a in site_name:
                 site_a_info = site_row.to_dict()
-                st.success(f"✅ 在DCN中找到站点A: {site_name}")
             if site_b in site_name:
                 site_b_info = site_row.to_dict()
-                st.success(f"✅ 在DCN中找到站点B: {site_name}")
-        
-        # 提取设备名称 - 使用正确的列名
-        device_a = None
-        device_b = None
-        
-        # 设备名称列名
-        device_columns = [
-            'NE ID Estação 1', 'NE ID Estação 2',
-            'NE ID Estacao 1', 'NE ID Estacao 2',
-            'NE ID Estação1', 'NE ID Estação2',
-            'NE ID Estacao1', 'NE ID Estacao2',
-            'Equipment Estação 1', 'Equipment Estação 2'
-        ]
-        
-        for col in device_columns:
-            if col in match_data:
-                if device_a is None:
-                    device_a = str(match_data[col]).strip()
-                    st.success(f"✅ 找到设备A ({col}): {device_a}")
-                elif device_b is None:
-                    device_b = str(match_data[col]).strip()
-                    st.success(f"✅ 找到设备B ({col}): {device_b}")
-                    break
-        
-        # 如果没找到，尝试其他可能的列名
-        if not device_a or not device_b:
-            for col in match_data.index:
-                if 'ne' in str(col).lower() or 'equipment' in str(col).lower():
-                    value = str(match_data[col]).strip()
-                    if value and value != 'nan':
-                        if device_a is None:
-                            device_a = value
-                            st.info(f"🔍 找到设备A ({col}): {device_a}")
-                        else:
-                            device_b = value
-                            st.info(f"🔍 找到设备B ({col}): {device_b}")
-                            break
-        
-        # 设备名转换 NO → ZT
-        if device_a:
-            device_a = device_a.replace('NO', 'ZT')
-            st.info(f"🔄 设备A转换后: {device_a}")
-        else:
-            device_a = f"设备A_{chave_number}"
-            
-        if device_b:
-            device_b = device_b.replace('NO', 'ZT')
-            st.info(f"🔄 设备B转换后: {device_b}")
-        else:
-            device_b = f"设备B_{chave_number}"
         
         # 提取无线参数
-        bandwidth_columns = ['AN', 'Bandwidth', 'Largura de Banda']
-        tx_power_columns = ['AS', 'TX Power', 'Potência TX']
-        tx_freq_columns = ['DR', 'TX Frequency', 'Frequência TX']
-        rx_freq_columns = ['DS', 'RX Frequency', 'Frequência RX']
+        bandwidth = match_data.get('AN', 112000)
+        tx_power = match_data.get('AS', 220)
+        tx_freq = match_data.get('DR', 14977000)
+        rx_freq = match_data.get('DS', 14577000)
         
-        bandwidth = 112000
-        tx_power = 220
-        tx_freq = 14977000
-        rx_freq = 14577000
+        # 计算网关（子网第一个IP+1）
+        def calculate_gateway(ip_with_subnet):
+            if not ip_with_subnet or '/' not in str(ip_with_subnet):
+                return '10.211.51.201'
+            network_ip = str(ip_with_subnet).split('/')[0]
+            ip_parts = network_ip.split('.')
+            return f"{ip_parts[0]}.{ip_parts[1]}.{ip_parts[2]}.{int(ip_parts[3]) + 1}"
         
-        # 查找参数
-        for col in bandwidth_columns:
-            if col in match_data:
-                bandwidth = match_data[col]
-                st.info(f"📡 带宽 ({col}): {bandwidth}")
-                break
-        
-        for col in tx_power_columns:
-            if col in match_data:
-                tx_power = match_data[col]
-                st.info(f"📡 发射功率 ({col}): {tx_power}")
-                break
-        
-        for col in tx_freq_columns:
-            if col in match_data:
-                tx_freq = match_data[col]
-                st.info(f"📡 发射频率 ({col}): {tx_freq}")
-                break
-        
-        for col in rx_freq_columns:
-            if col in match_data:
-                rx_freq = match_data[col]
-                st.info(f"📡 接收频率 ({col}): {rx_freq}")
-                break
+        gateway_a = calculate_gateway(site_a_info.get('子网掩码') if site_a_info else None)
+        gateway_b = calculate_gateway(site_b_info.get('子网掩码') if site_b_info else None)
         
         config = {
             'chave_number': chave_number,
             'site_a': {
-                'name': site_a,
-                'device': device_a,
+                'site_name': site_a,  # 站点名称如 4G-CORD10
+                'device_name': device_a,  # 设备名称如 MWE-MG-4G-CORD10-N1-ZT
                 'ip': site_a_info.get('IP地址') if site_a_info else '10.211.51.202',
                 'vlan': site_a_info.get('VLAN') if site_a_info else 2929,
+                'gateway': gateway_a
             },
             'site_b': {
-                'name': site_b,
-                'device': device_b,
+                'site_name': site_b,
+                'device_name': device_b,
                 'ip': site_b_info.get('IP地址') if site_b_info else '10.211.51.203',
                 'vlan': site_b_info.get('VLAN') if site_b_info else 2929,
+                'gateway': gateway_b
             },
             'radio_params': {
                 'bandwidth': bandwidth,
                 'tx_power': tx_power,
                 'tx_frequency': tx_freq,
                 'rx_frequency': rx_freq,
-                'modulation': 'qpsk'
+                'modulation': 'bpsk',  # 根据模板使用bpsk
+                'operation_mode': 'G02'
             }
         }
         
@@ -339,38 +215,224 @@ class DataProcessor:
 class ZTEScriptGenerator:
     @staticmethod
     def generate_script(config, for_site_a=True):
-        """生成ZTE脚本"""
+        """生成精确的ZTE脚本"""
         if for_site_a:
             site = config['site_a']
             peer = config['site_b']
-            direction = f"To_{peer['name'].split('-')[-1]}_H1"
+            site_id = site['site_name']  # 如 4G-CORD10
         else:
             site = config['site_b']
             peer = config['site_a']
-            direction = f"To_{peer['name'].split('-')[-1]}_H1"
+            site_id = site['site_name']
+        
+        # 生成对端描述
+        peer_suffix = peer['site_name'].split('-')[-1]  # 如 CODV29 中的 CODV29
         
         script = f"""configure terminal
 
-hostname {site['device']}
+radio-global-switch enable 
 
-device-para neIpv4 {site['ip']}
+!
+device-para siteId  {site_id} 
+hostname {site['device_name']}
 
-nms-vlan {site['vlan']}
-interface vlan{site['vlan']}
-ip address {site['ip']} 255.255.255.248
+!
+device-para neIpType  ipv4 
+device-para neIpv4  {site['ip']} 
+
+!
+nms-vlan  {site['vlan']} 
+interface   vlan{site['vlan']} 
+ip address  {site['ip']}  255.255.255.248 
 $
 
-radio-channel radio-1/1/0/1
-bandwidth {config['radio_params']['bandwidth']}
-modulation
-fixed-modulation {config['radio_params']['modulation']}
-$
-tx-frequency {config['radio_params']['tx_frequency']}
-rx-frequency {config['radio_params']['rx_frequency']}
-tx-power {config['radio_params']['tx_power']}
-discription {direction}
+!
+ip route 0.0.0.0 0.0.0.0  {site['gateway']} 
+
+!
+
+clock timezone  America/Sao_Paulo  -3 
+
+
+!
+ntp  enable 
+ntp poll-interval  8 
+ntp source ipv4  {site['ip']} 
+
+!
+ntp server     10.192.12.200  priority  1 
+
+ntp server     10.216.96.174  priority  2 
+
+!
+snmp-server version v3  enable 
+snmp-server  enable trap snmp 
+snmp-server trap-source  {site['ip']} 
+
+!
+snmp-server group   group1 v3 priv read AllView write AllView notify AllView 
+snmp-server user  zte  group1 v3 auth  md5   ZXMW.nr10 priv des56   Ztesnmp2014 
+
+snmp-server group   group1 v3 priv read AllView write AllView notify AllView 
+snmp-server user  telco_zte  group1 v3 auth  md5   Telco@zte123 priv des56   Telco@zte123 
+
+!
+snmp-server host    10.98.178.109 trap version 3 priv  zte udp-port 162 snmp 
+
+snmp-server host    10.103.67.13 trap version 3 priv  zte udp-port 162 snmp 
+
+snmp-server host    10.216.59.50 trap version 3 priv  telco_zte udp-port 162 snmp 
+
+snmp-server host    10.192.67.183 trap version 3 priv  telco_zte udp-port 162 snmp 
+
+snmp-server host    10.221.63.226 trap version 3 priv  telco_zte udp-port 162 snmp 
+
+
+radio-group xpic
+xpic  xpic-1 
+mode auto
+members
+member  tu-1/1/0/1 horizontal 
+member  tu-1/1/0/2 vertical 
+activate
 yes
 $
+$
+$
+!
+pla
+pla-group  pla-1/1/0/1 
+member  tu-1/1/0/1 
+yes
+$
+member  tu-1/1/0/2 
+yes
+$
+$
+
+!
+radio-channel  radio-1/1/0/1 
+bandwidth  {config['radio_params']['bandwidth']} 
+yes
+modulation
+fixed-modulation  {config['radio_params']['modulation']} 
+$
+tx-frequency  {config['radio_params']['tx_frequency']} 
+rx-frequency  {config['radio_params']['rx_frequency']} 
+tx-power  {config['radio_params']['tx_power']} 
+discription  To_{peer_suffix}_H1 
+operation-mode  {config['radio_params']['operation_mode']} 
+yes
+$
+
+!
+radio-channel  radio-1/1/0/2 
+bandwidth  {config['radio_params']['bandwidth']} 
+yes
+modulation
+fixed-modulation  {config['radio_params']['modulation']} 
+$
+tx-frequency  {config['radio_params']['tx_frequency']} 
+rx-frequency  {config['radio_params']['rx_frequency']} 
+tx-power  {config['radio_params']['tx_power']} 
+discription  To_{peer_suffix}_V1 
+operation-mode  {config['radio_params']['operation_mode']} 
+yes
+$
+
+!
+!
+
+antenna 1
+tu-name radio-1/1/0/1
+azimuth 256.38
+elevation -1.09
+height 19.0
+install-pol-type horizontal
+manufactures ZTE
+size 0.6
+type MA06U15
+$
+
+antenna 2
+tu-name radio-1/1/0/2
+azimuth 256.38
+elevation -1.09
+height 19.0
+install-pol-type vertical
+manufactures ZTE
+size 0.6
+type MA06U15
+$
+
+$
+interface  xgei-1/1/0/5 
+no shutdown
+description  
+speed  speed-10G 
+$
+
+interface  xgei-1/1/0/6 
+no shutdown
+description  
+speed  speed-10G 
+$
+
+interface  xgei-1/1/0/7 
+no shutdown
+description  
+speed  speed-10G 
+$
+
+interface  xgei-1/1/0/8 
+no shutdown
+description  
+speed  speed-10G 
+$
+
+!
+switchvlan-configuration
+interface  pla-1/1/0/1 
+switchport mode trunk
+switchport trunk vlan  {site['vlan']} 
+$
+$
+
+switchvlan-configuration
+interface  xgei-1/1/0/5 
+switchport mode trunk
+switchport trunk vlan  {site['vlan']} 
+$
+$
+
+switchvlan-configuration
+interface  xgei-1/1/0/6 
+switchport mode trunk
+switchport trunk vlan  {site['vlan']} 
+$
+$
+
+switchvlan-configuration
+interface  xgei-1/1/0/7 
+switchport mode trunk
+switchport trunk vlan  {site['vlan']} 
+$
+$
+
+switchvlan-configuration
+interface  xgei-1/1/0/8 
+switchport mode trunk
+switchport trunk vlan  {site['vlan']} 
+$
+$
+
+! 
+
+line   netconf absolute-timeout 0  
+
+line netconf   idle-timeout 0  
+
+exit 
 
 write
 """
@@ -425,16 +487,16 @@ if chave_number and st.session_state.dcn_data is not None and st.session_state.d
         col1, col2 = st.columns(2)
         
         with col1:
-            if st.button(f"生成 {config['site_a']['name']} 脚本"):
+            if st.button(f"生成 {config['site_a']['device_name']} 脚本", use_container_width=True):
                 script = generator.generate_script(config, for_site_a=True)
                 st.session_state.script_a = script
-                st.session_state.site_a = config['site_a']['name']
+                st.session_state.site_a = config['site_a']['device_name']
         
         with col2:
-            if st.button(f"生成 {config['site_b']['name']} 脚本"):
+            if st.button(f"生成 {config['site_b']['device_name']} 脚本", use_container_width=True):
                 script = generator.generate_script(config, for_site_a=False)
                 st.session_state.script_b = script
-                st.session_state.site_b = config['site_b']['name']
+                st.session_state.site_b = config['site_b']['device_name']
 
 # 显示生成的脚本
 if hasattr(st.session_state, 'script_a'):
@@ -453,9 +515,10 @@ if hasattr(st.session_state, 'script_b'):
 
 st.sidebar.markdown("---")
 st.sidebar.info("""
-**修复说明:**
-✅ 使用正确的列名: Site ID Estação 1/2
-✅ 支持葡萄牙语列名
-✅ 详细的调试信息
-✅ 增强列名匹配
+**精确脚本生成:**
+✅ 完全匹配实际脚本模板
+✅ 正确的siteId和hostname映射
+✅ 自动网关计算
+✅ H/V通道正确描述
+✅ 保持所有固定配置
 """)
