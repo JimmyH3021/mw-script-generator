@@ -10,8 +10,8 @@ st.set_page_config(
     layout="wide"
 )
 
-st.title("📡 ZTE微波脚本生成器")
-st.subheader("增强列名检测版本")
+st.title("📡 ZTE微波开站脚本生成器")
+st.subheader("最终版本 - 自动列名匹配")
 
 class DataProcessor:
     @staticmethod
@@ -90,16 +90,6 @@ class DataProcessor:
                 return None
             
             st.success(f"✅ Datasheet加载成功，共 {len(df)} 条记录")
-            
-            # 显示所有列名用于调试
-            st.info("📋 Datasheet所有列名:")
-            for i, col in enumerate(df.columns):
-                st.write(f"{i}: '{col}'")
-            
-            # 显示前3行数据
-            st.info("📊 前3行数据:")
-            st.dataframe(df.head(3))
-            
             return df
             
         except Exception as e:
@@ -107,106 +97,35 @@ class DataProcessor:
             return None
     
     @staticmethod
-    def enhanced_column_detection(datasheet_data):
-        """增强列名检测 - 使用模糊匹配"""
+    def auto_detect_columns(datasheet_data):
+        """自动检测列名 - 使用已知的列名"""
         detected_columns = {}
-        all_columns = datasheet_data.columns.tolist()
         
-        st.info("🔍 正在检测列名...")
+        # 已知的列名映射
+        column_mapping = {
+            'chave': 'Chave',
+            'site_a': 'Site ID Estação 1', 
+            'site_b': 'Site ID Estação 2',
+            'device': 'Nome Elemento Estação 1',
+            'bandwidth': 'Largura de banda do canal (MHz)',
+            'tx_power': 'Potência TX máxima (dBm)',
+            'tx_freq': 'Frequência Central Estação 1 (MHz)',
+            'rx_freq': 'Frequência Central Estação 2 (MHz)'
+        }
         
-        # 显示所有列名用于调试
-        st.write("所有可用列名:", all_columns)
-        
-        # CHAVE列检测
-        chave_keywords = ['chave', 'chave']
-        for col in all_columns:
-            col_lower = str(col).lower()
-            if any(keyword in col_lower for keyword in chave_keywords):
-                detected_columns['chave'] = col
-                st.success(f"✅ 检测到CHAVE列: '{col}'")
-                break
-        
-        # 站点A列检测 - 更宽松的匹配
-        site_a_keywords = ['estação 1', 'estacao 1', 'station 1', 'site 1', 'siteidestação1']
-        for col in all_columns:
-            col_lower = str(col).lower().replace(' ', '').replace('-', '').replace('_', '')
-            if any(keyword in col_lower for keyword in site_a_keywords):
-                detected_columns['site_a'] = col
-                st.success(f"✅ 检测到站点A列: '{col}'")
-                break
-        
-        # 站点B列检测 - 更宽松的匹配
-        site_b_keywords = ['estação 2', 'estacao 2', 'station 2', 'site 2', 'siteidestação2']
-        for col in all_columns:
-            col_lower = str(col).lower().replace(' ', '').replace('-', '').replace('_', '')
-            if any(keyword in col_lower for keyword in site_b_keywords):
-                detected_columns['site_b'] = col
-                st.success(f"✅ 检测到站点B列: '{col}'")
-                break
-        
-        # 设备列检测
-        device_keywords = ['nome elemento', 'ne id', 'equipment', 'device', 'nomedoelemento']
-        for col in all_columns:
-            col_lower = str(col).lower()
-            if any(keyword in col_lower for keyword in device_keywords):
-                detected_columns['device'] = col
-                st.success(f"✅ 检测到设备列: '{col}'")
-                break
-        
-        # 带宽列检测
-        bandwidth_keywords = ['largura de banda', 'bandwidth', 'banda', 'largura']
-        for col in all_columns:
-            col_lower = str(col).lower()
-            if any(keyword in col_lower for keyword in bandwidth_keywords):
-                detected_columns['bandwidth'] = col
-                st.success(f"✅ 检测到带宽列: '{col}'")
-                break
-        
-        # 发射功率列检测
-        tx_power_keywords = ['potência tx', 'potencia tx', 'tx power', 'txpower']
-        for col in all_columns:
-            col_lower = str(col).lower()
-            if any(keyword in col_lower for keyword in tx_power_keywords):
-                detected_columns['tx_power'] = col
-                st.success(f"✅ 检测到发射功率列: '{col}'")
-                break
-        
-        # 发射频率列检测
-        tx_freq_keywords = ['frequência central estação 1', 'frequencia central estacao 1', 'tx frequency', 'txfreq']
-        for col in all_columns:
-            col_lower = str(col).lower()
-            if any(keyword in col_lower for keyword in tx_freq_keywords):
-                detected_columns['tx_freq'] = col
-                st.success(f"✅ 检测到发射频率列: '{col}'")
-                break
-        
-        # 接收频率列检测
-        rx_freq_keywords = ['frequência central estação 2', 'frequencia central estacao 2', 'rx frequency', 'rxfreq']
-        for col in all_columns:
-            col_lower = str(col).lower()
-            if any(keyword in col_lower for keyword in rx_freq_keywords):
-                detected_columns['rx_freq'] = col
-                st.success(f"✅ 检测到接收频率列: '{col}'")
-                break
-        
-        return detected_columns
-    
-    @staticmethod
-    def manual_column_selection(datasheet_data, detected_columns):
-        """手动选择缺失的列"""
-        st.warning("⚠️ 自动检测到部分列缺失，请手动选择:")
-        
-        all_columns = datasheet_data.columns.tolist()
-        required_columns = ['chave', 'site_a', 'site_b', 'device']
-        
-        for col_type in required_columns:
-            if col_type not in detected_columns:
-                detected_columns[col_type] = st.selectbox(
-                    f"选择{col_type}列", 
-                    options=all_columns,
-                    key=f"manual_{col_type}"
-                )
-                st.info(f"已选择 {col_type}: '{detected_columns[col_type]}'")
+        # 检查每个列是否存在
+        for col_type, expected_col in column_mapping.items():
+            if expected_col in datasheet_data.columns:
+                detected_columns[col_type] = expected_col
+                st.success(f"✅ 找到{col_type}列: '{expected_col}'")
+            else:
+                st.error(f"❌ 未找到{col_type}列: '{expected_col}'")
+                # 尝试查找相似的列名
+                for actual_col in datasheet_data.columns:
+                    if expected_col.lower() in actual_col.lower():
+                        detected_columns[col_type] = actual_col
+                        st.warning(f"⚠️ 使用相似列名 {col_type}: '{actual_col}'")
+                        break
         
         return detected_columns
     
@@ -218,19 +137,13 @@ class DataProcessor:
         
         st.info(f"🔍 正在查找CHAVE: {chave_number}")
         
-        # 增强列名检测
-        detected_columns = DataProcessor.enhanced_column_detection(datasheet_data)
+        # 自动检测列名
+        detected_columns = DataProcessor.auto_detect_columns(datasheet_data)
         
-        # 如果自动检测失败，手动选择
+        # 检查必要列
         required_columns = ['chave', 'site_a', 'site_b', 'device']
         missing_columns = [col for col in required_columns if col not in detected_columns]
         
-        if missing_columns:
-            st.warning(f"自动检测缺少列: {missing_columns}")
-            detected_columns = DataProcessor.manual_column_selection(datasheet_data, detected_columns)
-        
-        # 检查是否所有必要列都已找到
-        missing_columns = [col for col in required_columns if col not in detected_columns]
         if missing_columns:
             st.error(f"❌ 缺少必要的列: {missing_columns}")
             return None
@@ -243,7 +156,7 @@ class DataProcessor:
         if len(matches) == 0:
             st.error(f"❌ 未找到CHAVE: {chave_number}")
             # 显示可用的CHAVE值
-            unique_chaves = datasheet_data[chave_col].unique()
+            unique_chaves = datasheet_data[chave_col].unique()[:10]  # 只显示前10个
             st.info(f"可用的CHAVE值: {list(unique_chaves)}")
             return None
         
@@ -280,28 +193,21 @@ class DataProcessor:
                 site_b_info = site_row.to_dict()
                 st.success(f"✅ 在DCN中找到站点B: {site_name}")
         
+        if not site_a_info or not site_b_info:
+            st.warning("⚠️ 在DCN中未找到完整的站点信息，使用默认值")
+        
         # 提取无线参数
-        bandwidth = match_data.get(detected_columns.get('bandwidth'), 112000)
+        bandwidth = match_data.get(detected_columns.get('bandwidth'), 112)
         tx_power = match_data.get(detected_columns.get('tx_power'), 220)
-        tx_freq = match_data.get(detected_columns.get('tx_freq'), 14977000)
-        rx_freq = match_data.get(detected_columns.get('rx_freq'), 14577000)
+        tx_freq = match_data.get(detected_columns.get('tx_freq'), 14977)
+        rx_freq = match_data.get(detected_columns.get('rx_freq'), 14577)
         
-        # 转换频率单位 MHz → Hz
-        if tx_freq and tx_freq > 10000:  # 如果已经是Hz单位就不转换
-            tx_freq = int(tx_freq)
-        elif tx_freq:
-            tx_freq = int(float(tx_freq) * 1000)
-        else:
-            tx_freq = 14977000
+        # 转换频率单位 MHz → KHz (乘以1000)
+        bandwidth_khz = int(bandwidth) * 1000
+        tx_freq_khz = int(tx_freq) * 1000
+        rx_freq_khz = int(rx_freq) * 1000
         
-        if rx_freq and rx_freq > 10000:
-            rx_freq = int(rx_freq)
-        elif rx_freq:
-            rx_freq = int(float(rx_freq) * 1000)
-        else:
-            rx_freq = 14577000
-        
-        st.info(f"📡 无线参数: 带宽={bandwidth}MHz, 功率={tx_power}dBm, 发射={tx_freq}Hz, 接收={rx_freq}Hz")
+        st.info(f"📡 无线参数: 带宽={bandwidth}MHz→{bandwidth_khz}KHz, 功率={tx_power}dBm, 发射={tx_freq}MHz→{tx_freq_khz}KHz, 接收={rx_freq}MHz→{rx_freq_khz}KHz")
         
         # 计算网关
         def calculate_gateway(ip_with_subnet):
@@ -325,16 +231,16 @@ class DataProcessor:
             },
             'site_b': {
                 'site_name': site_b,
-                'device_name': device_name.replace(site_a, site_b) if site_a and site_b and site_a in device_name else f"MWE-MG-{site_b}-N1-ZT",
+                'device_name': device_name.replace(site_a, site_b) if site_a in device_name else f"MWE-MG-{site_b}-N1-ZT",
                 'ip': site_b_info.get('IP地址') if site_b_info else '10.211.51.203',
                 'vlan': site_b_info.get('VLAN') if site_b_info else 2929,
                 'gateway': gateway_b
             },
             'radio_params': {
-                'bandwidth': int(bandwidth) * 1000 if bandwidth and bandwidth < 1000 else int(bandwidth) if bandwidth else 112000,
-                'tx_power': int(tx_power) if tx_power else 220,
-                'tx_frequency': tx_freq,
-                'rx_frequency': rx_freq,
+                'bandwidth': bandwidth_khz,
+                'tx_power': int(tx_power),
+                'tx_frequency': tx_freq_khz,
+                'rx_frequency': rx_freq_khz,
                 'modulation': 'bpsk',
                 'operation_mode': 'G02'
             }
@@ -342,7 +248,7 @@ class DataProcessor:
         
         return config
 
-# ZTEScriptGenerator 类保持不变（使用之前的完整版本）
+# ZTEScriptGenerator 类保持不变
 class ZTEScriptGenerator:
     @staticmethod
     def generate_script(config, for_site_a=True):
@@ -369,7 +275,7 @@ hostname {site['device_name']}
 
 !
 device-para neIpType  ipv4 
-device-para neIv4  {site['ip']} 
+device-para neIpv4  {site['ip']} 
 
 !
 nms-vlan  {site['vlan']} 
@@ -646,9 +552,10 @@ if hasattr(st.session_state, 'script_b'):
 
 st.sidebar.markdown("---")
 st.sidebar.info("""
-**增强列名检测:**
-✅ 模糊匹配列名
-✅ 自动+手动选择
-✅ 显示所有列名
-✅ 详细的调试信息
+**最终版本特性:**
+✅ 自动识别所有列名
+✅ 正确的单位转换
+✅ 设备名NO→ZT转换
+✅ 精确的脚本生成
+✅ 完整的调试信息
 """)
