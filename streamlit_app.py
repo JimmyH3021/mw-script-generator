@@ -56,18 +56,20 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 class DataProcessor:
-    """数据处理类 - 专门针对巴西ZTE微波项目"""
+    """数据处理类 - 支持Excel格式"""
     
     @staticmethod
     def parse_dcn_file(file):
-        """解析DCN文件 - 巴西格式"""
+        """解析DCN文件 - 支持XLSX和XLS格式"""
         try:
             if file.name.endswith('.csv'):
                 df = pd.read_csv(file, encoding='utf-8')
-            else:
-                # Excel文件
+            elif file.name.endswith(('.xlsx', '.xls')):
+                # Excel文件 - 自动选择引擎
                 excel_file = pd.ExcelFile(file)
                 sheet_names = excel_file.sheet_names
+                
+                st.info(f"📑 检测到 {len(sheet_names)} 个sheet: {', '.join(sheet_names)}")
                 
                 # 自动查找 PROJETO LÓGICO sheet
                 target_sheet = None
@@ -77,9 +79,16 @@ class DataProcessor:
                         break
                 
                 if target_sheet is None:
+                    st.warning("⚠️ 未找到 'PROJETO LÓGICO' sheet，使用第一个sheet")
                     target_sheet = sheet_names[0]
+                else:
+                    st.success(f"🎯 自动选择: {target_sheet}")
                 
+                # 读取选中的sheet
                 df = pd.read_excel(file, sheet_name=target_sheet)
+            else:
+                st.error("❌ 不支持的文件格式，请上传CSV、XLSX或XLS文件")
+                return None
             
             # 数据清理
             df_cleaned = DataProcessor.clean_dcn_data(df)
@@ -88,6 +97,7 @@ class DataProcessor:
                 
         except Exception as e:
             st.error(f"❌ DCN文件解析失败: {e}")
+            st.info("💡 如果持续失败，请尝试将文件另存为CSV格式上传")
             return None
     
     @staticmethod
@@ -100,11 +110,12 @@ class DataProcessor:
         data_start_row = 0
         for idx, row in df.iterrows():
             row_str = ' '.join([str(x) for x in row.values if pd.notna(x)])
-            if 'End. IP' in row_str or '10.211.' in row_str:
+            if any(keyword in row_str for keyword in ['End. IP', '10.211.', 'IP地址', 'VLAN']):
                 data_start_row = idx
                 break
         
         if data_start_row > 0:
+            # 重新设置列名
             new_columns = df.iloc[data_start_row]
             df = df.iloc[data_start_row + 1:]
             df = df.reset_index(drop=True)
@@ -115,29 +126,35 @@ class DataProcessor:
             'End. IP': 'IP地址',
             'Subnet': '子网掩码', 
             'Obs': '站点名称',
-            'Vlan': 'VLAN'
+            'Vlan': 'VLAN',
+            'End IP': 'IP地址',
+            'Subnet Mask': '子网掩码',
+            'Site Name': '站点名称',
+            '站点名': '站点名称'
         }
         
         df = df.rename(columns=column_mapping)
         df = df.dropna(how='all')
         
+        st.info(f"📋 处理后的列: {', '.join(df.columns.tolist())}")
         return df
 
     @staticmethod
     def parse_datasheet_file(file):
-        """解析Datasheet文件 - 专门针对ZTE微波格式"""
+        """解析Datasheet文件 - 支持XLSX和XLS格式"""
         try:
             if file.name.endswith('.csv'):
                 df = pd.read_csv(file, encoding='utf-8')
-            else:
+            elif file.name.endswith(('.xlsx', '.xls')):
                 df = pd.read_excel(file)
+            else:
+                st.error("❌ 不支持的文件格式，请上传CSV、XLSX或XLS文件")
+                return None
             
             st.success(f"✅ Datasheet加载成功，共 {len(df)} 条记录")
-            
-            # 显示列名帮助调试
             st.info(f"📋 Datasheet列名: {', '.join(df.columns.tolist())}")
-            
             return df
+                
         except Exception as e:
             st.error(f"❌ Datasheet解析失败: {e}")
             return None
@@ -152,24 +169,54 @@ class DataProcessor:
         
         # 1. 在Datasheet中查找CHAVE
         chave_match = None
-        if 'Chave' in datasheet_data.columns:
-            datasheet_data['Chave'] = datasheet_data['Chave'].astype(str)
-            chave_match = datasheet_data[datasheet_data['Chave'] == str(chave_number)]
+        
+        # 尝试不同的CHAVE列名
+        chave_columns = ['Chave', 'CHAVE', 'chave', '站点编号', '编号']
+        chave_col = None
+        
+        for col in chave_columns:
+            if col in datasheet_data.columns:
+                chave_col = col
+                break
+        
+        if chave_col is None:
+            st.error("❌ 在Datasheet中未找到CHAVE列")
+            st.info(f"📋 可用的列: {', '.join(datasheet_data.columns.tolist())}")
+            return None
+        
+        datasheet_data[chave_col] = datasheet_data[chave_col].astype(str)
+        chave_match = datasheet_data[datasheet_data[chave_col] == str(chave_number)]
         
         if len(chave_match) == 0:
             st.error(f"❌ 在Datasheet中未找到CHAVE: {chave_number}")
+            # 显示前几个CHAVE值帮助调试
+            sample_values = datasheet_data[chave_col].unique()[:5]
+            st.info(f"📋 文件中存在的CHAVE值示例: {', '.join(map(str, sample_values))}")
             return None
         
         datasheet_info = chave_match.iloc[0]
         st.success(f"✅ 在Datasheet中找到CHAVE配置")
         
-        # 2. 在DCN中查找对应的站点信息
-        site_a_name = str(datasheet_info.get('L', '')).strip()  # 站点A名称
-        site_b_name = str(datasheet_info.get('M', '')).strip()  # 站点B名称
+        # 2. 提取站点名称（L/M列）
+        site_a_name = None
+        site_b_name = None
+        
+        # 尝试不同的列名
+        for col in ['L', 'M', '站点A', '站点B']:
+            if col in datasheet_info:
+                if site_a_name is None:
+                    site_a_name = str(datasheet_info[col]).strip()
+                else:
+                    site_b_name = str(datasheet_info[col]).strip()
+                    break
+        
+        if not site_a_name or not site_b_name:
+            st.error("❌ 无法找到站点名称信息")
+            return None
         
         st.info(f"📡 关联站点: {site_a_name} ↔ {site_b_name}")
         
-        # 查找站点A在DCN中的信息
+        # 3. 在DCN中查找对应的站点信息
         site_a_info = None
         site_b_info = None
         
@@ -182,17 +229,22 @@ class DataProcessor:
         
         if not site_a_info and not site_b_info:
             st.error("❌ 在DCN中未找到对应的站点信息")
+            st.info("💡 请检查站点名称是否匹配")
+            # 显示DCN中的站点名称示例
+            sample_sites = dcn_data['站点名称'].astype(str).unique()[:5] if '站点名称' in dcn_data.columns else []
+            if len(sample_sites) > 0:
+                st.info(f"📋 DCN中站点名称示例: {', '.join(sample_sites)}")
             return None
         
-        # 3. 提取设备配置
-        device_a = str(datasheet_info.get('N', '')).strip()  # 设备A
-        device_b = str(datasheet_info.get('O', '')).strip()  # 设备B
+        # 4. 提取设备配置（N/O列）
+        device_a = str(datasheet_info.get('N', '')).strip() if 'N' in datasheet_info else f"设备A_{chave_number}"
+        device_b = str(datasheet_info.get('O', '')).strip() if 'O' in datasheet_info else f"设备B_{chave_number}"
         
         # 设备名称处理：将NO改为ZT
         device_a = device_a.replace('NO', 'ZT')
         device_b = device_b.replace('NO', 'ZT')
         
-        # 4. 提取无线参数
+        # 5. 提取无线参数
         bandwidth = datasheet_info.get('AN', 112000)  # 带宽
         tx_power = datasheet_info.get('AS', 220)      # 发射功率
         tx_freq = datasheet_info.get('DR', 14977000)  # 发射频率
@@ -207,7 +259,6 @@ class DataProcessor:
                 'ip': site_a_info.get('IP地址') if site_a_info else None,
                 'vlan': site_a_info.get('VLAN') if site_a_info else 2929,
                 'subnet': site_a_info.get('子网掩码') if site_a_info else '10.211.51.200/29',
-                'is_zt': 'ZT' in device_a
             },
             'site_b': {
                 'name': site_b_name,
@@ -215,7 +266,6 @@ class DataProcessor:
                 'ip': site_b_info.get('IP地址') if site_b_info else None,
                 'vlan': site_b_info.get('VLAN') if site_b_info else 2929,
                 'subnet': site_b_info.get('子网掩码') if site_b_info else '10.211.51.200/29',
-                'is_zt': 'ZT' in device_b
             },
             'radio_params': {
                 'bandwidth': bandwidth,
@@ -229,6 +279,7 @@ class DataProcessor:
         
         return config
 
+# ZTEScriptGenerator 类保持不变
 class ZTEScriptGenerator:
     """ZTE微波脚本生成器 - 基于实际模板"""
     
@@ -472,7 +523,7 @@ def create_download_link(content, filename, text):
 def main():
     """主应用"""
     st.markdown('<h1 class="main-header">📡 ZTE微波开站脚本生成器</h1>', unsafe_allow_html=True)
-    st.markdown('<h3 style="text-align: center; color: #666;">巴西项目专用 - 基于实际脚本模板</h3>', unsafe_allow_html=True)
+    st.markdown('<h3 style="text-align: center; color: #666;">Excel格式专用版本</h3>', unsafe_allow_html=True)
     
     # 初始化处理器和生成器
     processor = DataProcessor()
@@ -491,14 +542,14 @@ def main():
         st.header("📁 文件上传")
         
         # DCN文件上传
-        dcn_file = st.file_uploader("上传DCN文件", type=['xlsx', 'xls', 'csv'], key="dcn_uploader")
+        dcn_file = st.file_uploader("上传DCN文件 (XLSX/XLS/CSV)", type=['xlsx', 'xls', 'csv'], key="dcn_uploader")
         if dcn_file is not None:
             st.session_state.dcn_data = processor.parse_dcn_file(dcn_file)
             if st.session_state.dcn_data is not None:
                 st.dataframe(st.session_state.dcn_data.head(3))
         
         # Datasheet文件上传
-        datasheet_file = st.file_uploader("上传Datasheet", type=['xlsx', 'xls', 'csv'], key="datasheet_uploader")
+        datasheet_file = st.file_uploader("上传Datasheet (XLSX/XLS/CSV)", type=['xlsx', 'xls', 'csv'], key="datasheet_uploader")
         if datasheet_file is not None:
             st.session_state.datasheet_data = processor.parse_datasheet_file(datasheet_file)
             if st.session_state.datasheet_data is not None:
@@ -574,12 +625,12 @@ def main():
         
         st.markdown("""
         <div class="config-box">
-        <h4>🚀 专用工作流程：</h4>
+        <h4>🚀 Excel格式专用版本：</h4>
         <ol>
-            <li><strong>上传DCN文件</strong> - 包含站点IP、VLAN信息</li>
-            <li><strong>上传Datasheet</strong> - 包含CHAVE、站点名称、设备参数</li>
-            <li><strong>输入CHAVE号码</strong> - 自动匹配所有信息</li>
-            <li><strong>一键生成脚本</strong> - 按照实际ZTE模板生成</li>
+            <li><strong>上传DCN文件</strong> (XLSX/XLS格式)</li>
+            <li><strong>上传Datasheet文件</strong> (XLSX/XLS格式)</li>
+            <li><strong>输入CHAVE号码</strong></li>
+            <li><strong>一键生成ZTE脚本</strong></li>
         </ol>
         
         <h4>🎯 自动处理功能：</h4>
@@ -592,14 +643,11 @@ def main():
             <li>✅ 按照实际ZTE脚本模板生成</li>
         </ul>
         
-        <h4>📋 数据映射：</h4>
+        <h4>📋 支持的文件格式：</h4>
         <ul>
-            <li><strong>Datasheet A列</strong>: CHAVE号码</li>
-            <li><strong>Datasheet L/M列</strong>: 站点A/B名称</li>
-            <li><strong>Datasheet N/O列</strong>: 设备名称 (NO→ZT)</li>
-            <li><strong>Datasheet AN列</strong>: 带宽</li>
-            <li><strong>Datasheet AS列</strong>: 发射功率</li>
-            <li><strong>Datasheet DR/DS列</strong>: 收发频率</li>
+            <li>✅ XLSX (Excel 2007+)</li>
+            <li>✅ XLS (Excel 97-2003)</li>
+            <li>✅ CSV (逗号分隔)</li>
         </ul>
         </div>
         """, unsafe_allow_html=True)
