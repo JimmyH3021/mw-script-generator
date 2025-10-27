@@ -97,59 +97,60 @@ class DataProcessor:
             if re.match(r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$', ip_str):
                 return ip_str
             
-            # 处理逗号分隔的IP (如 "10,226,106,192")
+            # 高优先级1: 处理逗号分隔的IP (如 "10,226,106,192")
             if ',' in ip_str:
                 ip_parts = ip_str.split(',')
                 if len(ip_parts) == 4:
-                    return '.'.join(ip_parts)
+                    # 验证每个部分是否在有效范围内
+                    if all(0 <= int(part) <= 255 for part in ip_parts):
+                        return '.'.join(ip_parts)
             
-            # 处理数字格式的IP (如 "10226106192")
-            if ip_str.replace('.', '').isdigit() and len(ip_str) >= 7:
-                # 尝试从数字格式解析IP
-                ip_num = ip_str.replace('.', '')
+            # 高优先级2: 处理AABBBCCCDDD格式 (如 "10226106192")
+            ip_num = ip_str.replace('.', '').replace(',', '')
+            if ip_num.isdigit() and len(ip_num) == 11:
+                # AABBBCCCDDD 格式: AA=10, BBB=226, CCC=106, DDD=192
+                part1 = ip_num[:2]    # 10
+                part2 = ip_num[2:5]   # 226
+                part3 = ip_num[5:8]   # 106
+                part4 = ip_num[8:]    # 192
                 
-                # 如果是11位数字，可能是没有点的IP地址
-                if len(ip_num) == 11:
-                    # 格式: AABBCCDDD -> AA.BB.CC.DDD
-                    part1 = ip_num[:2]  # 10
-                    part2 = ip_num[2:4]  # 226
-                    part3 = ip_num[4:6]  # 106
-                    part4 = ip_num[6:]   # 192
+                # 验证每个部分是否在有效范围内
+                if (0 <= int(part1) <= 255 and 
+                    0 <= int(part2) <= 255 and 
+                    0 <= int(part3) <= 255 and 
+                    0 <= int(part4) <= 255):
                     return f"{part1}.{part2}.{part3}.{part4}"
-                
-                # 如果是10位数字
-                elif len(ip_num) == 10:
-                    # 格式: AABBCCDD -> AA.BB.CC.DD
-                    part1 = ip_num[:2]  # 10
-                    part2 = ip_num[2:4]  # 226
-                    part3 = ip_num[4:6]  # 106
-                    part4 = ip_num[6:]   # 192
-                    return f"{part1}.{part2}.{part3}.{part4}"
-                
-                # 如果是8-9位数字，尝试不同的分割方式
-                elif 8 <= len(ip_num) <= 9:
-                    # 尝试 3-2-2-2 或 3-2-2-1 等分割方式
-                    for i in range(1, 4):
-                        for j in range(1, 4):
-                            for k in range(1, 4):
-                                if i + j + k < len(ip_num):
-                                    part1 = ip_num[:i]
-                                    part2 = ip_num[i:i+j]
-                                    part3 = ip_num[i+j:i+j+k]
-                                    part4 = ip_num[i+j+k:]
-                                    
-                                    # 验证每个部分是否在有效范围内
-                                    if (0 <= int(part1) <= 255 and 
-                                        0 <= int(part2) <= 255 and 
-                                        0 <= int(part3) <= 255 and 
-                                        0 <= int(part4) <= 255):
-                                        return f"{part1}.{part2}.{part3}.{part4}"
+            
+            # 其他情况: 自动智能识别
+            if ip_num.isdigit() and len(ip_num) >= 7:
+                # 尝试不同的分割方式
+                for i in range(1, 4):    # 第一部分长度
+                    for j in range(1, 4): # 第二部分长度
+                        for k in range(1, 4): # 第三部分长度
+                            if i + j + k < len(ip_num):
+                                part1 = ip_num[:i]
+                                part2 = ip_num[i:i+j]
+                                part3 = ip_num[i+j:i+j+k]
+                                part4 = ip_num[i+j+k:]
+                                
+                                # 验证每个部分是否在有效范围内
+                                if (0 <= int(part1) <= 255 and 
+                                    0 <= int(part2) <= 255 and 
+                                    0 <= int(part3) <= 255 and 
+                                    0 <= int(part4) <= 255):
+                                    return f"{part1}.{part2}.{part3}.{part4}"
             
             # 如果无法解析，返回原始值
             return ip_str
         
         # 应用IP地址格式修复
+        original_ips = df['IP地址'].tolist()
         df['IP地址'] = df['IP地址'].apply(convert_ip_format)
+        
+        # 显示修复信息
+        for i, (original, fixed) in enumerate(zip(original_ips, df['IP地址'])):
+            if original != fixed:
+                st.info(f"🔧 IP地址修复: {original} → {fixed}")
         
         return df
 
@@ -693,9 +694,9 @@ if hasattr(st.session_state, 'config') and st.session_state.config:
 
 st.sidebar.markdown("---")
 st.sidebar.info("""
-**IP地址修复版本:**
-✅ 自动修复IP地址格式问题
-✅ 支持逗号分隔的IP
-✅ 支持数字格式IP转换
-✅ 完整的格式识别
+**IP地址智能识别版本:**
+✅ 高优先级: 逗号分隔格式
+✅ 高优先级: AABBBCCCDDD格式  
+✅ 自动智能识别其他格式
+✅ 实时显示修复过程
 """)
