@@ -14,7 +14,7 @@ st.set_page_config(
 )
 
 st.title("📡 ZTE微波脚本生成器")
-st.markdown("**ZTE微波配置脚本自动生成器：智能解析数据文件，一键生成设备脚本，支持批量下载。**")
+st.markdown("**123**")
 
 class DataProcessor:
     @staticmethod
